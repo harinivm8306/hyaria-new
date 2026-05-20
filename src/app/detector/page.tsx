@@ -139,26 +139,26 @@ export default function DetectorPage() {
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div className="p-4 bg-white/5 rounded-2xl">
+                                        <div className="p-4 bg-foreground/5 rounded-2xl border border-foreground/5">
                                             <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest block mb-1">Plant Type</span>
                                             <span className="font-bold text-lg">{result.plant_detected}</span>
                                         </div>
-                                        <div className="p-4 bg-white/5 rounded-2xl">
+                                        <div className="p-4 bg-foreground/5 rounded-2xl border border-foreground/5">
                                             <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest block mb-1">Confidence</span>
                                             <span className="font-bold text-lg">{(result.confidence * 100).toFixed(1)}%</span>
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-white/5 rounded-2xl">
-                                        <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest block mb-1">Detected Disease</span>
-                                        <span className="font-bold text-lg text-primary">{result.disease}</span>
+                                    <div className="p-4 bg-primary/10 rounded-2xl border border-primary/20">
+                                        <span className="text-[10px] font-bold text-primary uppercase tracking-widest block mb-1 font-black">Detected Disease</span>
+                                        <span className="font-bold text-lg text-foreground">{result.disease}</span>
                                     </div>
 
                                     <div className="flex-1 p-6 bg-primary/5 border border-primary/20 rounded-2xl mt-4">
                                         <h4 className="text-xs font-black uppercase tracking-widest mb-3 text-primary flex items-center gap-2">
                                             <Thermometer size={14} /> Treatment Plan
                                         </h4>
-                                        <p className="text-sm font-medium leading-relaxed">
+                                        <p className="text-sm font-medium leading-relaxed text-foreground">
                                             {result.treatment_plan}
                                         </p>
                                     </div>
@@ -169,15 +169,15 @@ export default function DetectorPage() {
                                             animate={{ opacity: 1 }}
                                             className="grid grid-cols-3 gap-3"
                                         >
-                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-center">
+                                            <div className="p-3 bg-foreground/5 rounded-xl border border-foreground/5 text-center">
                                                 <span className="text-[9px] font-bold text-text-muted uppercase block">Leaves</span>
                                                 <span className="font-bold text-sm text-primary">{result.precision_data.infected_count}/{result.precision_data.total_leaves}</span>
                                             </div>
-                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-center">
+                                            <div className="p-3 bg-foreground/5 rounded-xl border border-foreground/5 text-center">
                                                 <span className="text-[9px] font-bold text-text-muted uppercase block">Severity</span>
                                                 <span className="font-bold text-sm text-primary">{result.precision_data.avg_severity_pct}%</span>
                                             </div>
-                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-center">
+                                            <div className="p-3 bg-foreground/5 rounded-xl border border-foreground/5 text-center">
                                                 <span className="text-[9px] font-bold text-text-muted uppercase block">Spray Dose</span>
                                                 <span className="font-bold text-sm text-primary">{result.precision_data.dosage_percent}%</span>
                                             </div>
