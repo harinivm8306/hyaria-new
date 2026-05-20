@@ -162,6 +162,27 @@ export default function DetectorPage() {
                                             {result.treatment_plan}
                                         </p>
                                     </div>
+
+                                    {result.precision_data && (
+                                        <motion.div
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            className="grid grid-cols-3 gap-3"
+                                        >
+                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-center">
+                                                <span className="text-[9px] font-bold text-text-muted uppercase block">Leaves</span>
+                                                <span className="font-bold text-sm text-primary">{result.precision_data.infected_count}/{result.precision_data.total_leaves}</span>
+                                            </div>
+                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-center">
+                                                <span className="text-[9px] font-bold text-text-muted uppercase block">Severity</span>
+                                                <span className="font-bold text-sm text-primary">{result.precision_data.avg_severity_pct}%</span>
+                                            </div>
+                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-center">
+                                                <span className="text-[9px] font-bold text-text-muted uppercase block">Spray Dose</span>
+                                                <span className="font-bold text-sm text-primary">{result.precision_data.dosage_percent}%</span>
+                                            </div>
+                                        </motion.div>
+                                    )}
                                 </motion.div>
                             ) : (
                                 <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-center">

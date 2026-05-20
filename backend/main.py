@@ -11,6 +11,8 @@ import json
 import tensorflow as tf
 from tensorflow.keras.models import load_model, model_from_json
 import cv2
+from ultralytics import YOLO
+import time
 
 app = FastAPI(title="HY-ARIA AI Backend")
 
@@ -66,6 +68,29 @@ def load_all_models():
         if not any(k.startswith('vision') for k in loaded_models):
             print("Warning: No Vision models found in models directory.")
         
+        # Load New Precision Models
+        yolo_path = os.path.join(MODELS_DIR, 'yolov8_leaf.pt')
+        mobilenet_path = os.path.join(MODELS_DIR, 'mobilenetv2_disease.keras')
+        class_names_path = os.path.join(MODELS_DIR, 'class_names.txt')
+        seg_path = os.path.join(MODELS_DIR, 'yolov8_seg.pt')
+
+        if os.path.exists(yolo_path):
+            loaded_models['yolo'] = YOLO(yolo_path)
+            print("Loaded YOLOv8 Leaf Detector.")
+        
+        if os.path.exists(mobilenet_path):
+            loaded_models['mobilenet'] = tf.keras.models.load_model(mobilenet_path, compile=False)
+            print("Loaded MobileNetV2 Disease Classifier.")
+
+        if os.path.exists(seg_path):
+            loaded_models['yolo_seg'] = YOLO(seg_path)
+            print("Loaded YOLOv8-seg Model.")
+
+        if os.path.exists(class_names_path):
+            with open(class_names_path, 'r') as f:
+                loaded_models['class_names'] = [l.strip() for l in f if l.strip()]
+            print("Loaded Disease Class Names.")
+
     except Exception as e:
         print(f"Error loading models: {e}")
 
@@ -125,161 +150,182 @@ async def predict_optimization(data: SensorData):
         "recommendation": f"System in {str(stage)} stage. {'Keep optimal lighting.' if data.light_intensity > 25000 else 'Increase light intensity.'}"
     }
 
+# --- Precision Disease Detection Helpers ---
+
+def get_disease_mask(seg_model, img_bgr, conf=0.25):
+    h, w = img_bgr.shape[:2]
+    try:
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        results = seg_model.predict(source=img_rgb, conf=conf, verbose=False)
+        combined_mask = np.zeros((h, w), dtype=np.uint8)
+        for r in results:
+            if hasattr(r, 'masks') and r.masks is not None and len(r.masks) > 0:
+                masks_data = r.masks.data.cpu().numpy()
+                for mask in masks_data:
+                    mask_resized = cv2.resize(mask.astype(np.float32), (w, h))
+                    binary_mask = (mask_resized > 0.5).astype(np.uint8) * 255
+                    combined_mask = cv2.bitwise_or(combined_mask, binary_mask)
+        return combined_mask
+    except Exception:
+        return None
+
+def estimate_severity_heuristic(crop_bgr):
+    if crop_bgr is None or crop_bgr.size == 0: return 0.0
+    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
+    lower_leaf = np.array([15, 20, 20])
+    upper_leaf = np.array([95, 255, 255])
+    leaf_mask = cv2.inRange(hsv, lower_leaf, upper_leaf)
+    leaf_pixels = cv2.countNonZero(leaf_mask)
+    if leaf_pixels < 100: return 0.0
+    
+    # Disease ranges (brown, yellow, necrotic)
+    lower_disease = np.array([0, 30, 30])
+    upper_disease = np.array([35, 255, 200])
+    disease_mask = cv2.inRange(hsv, lower_disease, upper_disease)
+    disease_mask = cv2.bitwise_and(disease_mask, leaf_mask)
+    
+    disease_pixels = cv2.countNonZero(disease_mask)
+    return float(np.clip((disease_pixels / leaf_pixels) * 100.0, 0.0, 100.0))
+
+def estimate_severity_from_mask(disease_mask, box, img_bgr):
+    x1, y1, x2, y2 = [int(v) for v in box]
+    h, w = disease_mask.shape[:2]
+    x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+    if x2 <= x1 or y2 <= y1: return 0.0
+    mask_crop = disease_mask[y1:y2, x1:x2]
+    disease_pixels = cv2.countNonZero(mask_crop)
+    # Estimate leaf area
+    leaf_crop = img_bgr[y1:y2, x1:x2]
+    gray = cv2.cvtColor(leaf_crop, cv2.COLOR_BGR2GRAY)
+    _, leaf_mask = cv2.threshold(gray, 30, 255, cv2.THRESH_BINARY)
+    leaf_pixels = cv2.countNonZero(leaf_mask)
+    if leaf_pixels < 100: leaf_pixels = (x2 - x1) * (y2 - y1)
+    return float(np.clip((disease_pixels / leaf_pixels) * 100.0, 0.0, 100.0))
+
+# --- End Helpers ---
+
 @app.post("/detect-disease")
 async def detect_disease(file: UploadFile = File(...)):
-    import tensorflow as tf
-    from tensorflow.keras.models import model_from_json
-    import numpy as np
-    
-    # Ensure models are loaded
-    for m_id, m_file in [('vision1', 'model.h5'), ('vision2', 'model2.h5'), ('vision3', 'model3.h5')]:
-        if m_id not in loaded_models:
-            path = os.path.join(MODELS_DIR, m_file)
-            if os.path.exists(path):
-                loaded_models[m_id] = load_model(path, compile=False)
-
-    if not any(k.startswith('vision') for k in loaded_models):
-        raise HTTPException(status_code=503, detail="No vision models available.")
-
     try:
-        # Expanded 39 labels from the new Hugging Face model
-        labels = [
-            'Apple Apple scab', 'Apple Black rot', 'Apple Cedar apple rust', 'Apple healthy',
-            'Neutral', # 4: Not a plant
-            'Blueberry healthy', 'Cherry Powdery mildew', 'Cherry healthy',
-            'Corn Cercospora leaf spot Gray leaf spot', 'Corn Common rust', 'Corn Northern Leaf Blight', 'Corn healthy',
-            'Grape Black rot', 'Grape Esca (Black Measles)', 'Grape Leaf blight (Isariopsis Leaf Spot)', 'Grape healthy',
-            'Orange Haunglongbing (Citrus greening)', 'Peach Bacterial spot', 'Peach healthy',
-            'Pepper bell Bacterial spot', 'Pepper bell healthy', 
-            'Potato Early blight', 'Potato Late blight', 'Potato healthy',
-            'Raspberry healthy', 'Soybean healthy', 'Squash Powdery mildew', 
-            'Strawberry Leaf scorch', 'Strawberry healthy',
-            'Tomato Bacterial spot', 'Tomato Early blight', 'Tomato Late blight', 'Tomato Leaf Mold', 
-            'Tomato Septoria leaf spot', 'Tomato Spider mites Two-spotted spider mite', 
-            'Tomato Target Spot', 'Tomato Tomato Yellow Leaf Curl Virus', 'Tomato Tomato mosaic virus', 'Tomato healthy'
-        ]
-        
-        # Mapping from Specialist (15 classes) to Global (39 classes)
-        # Specialist labels: P_Bact(0), P_H(1), Pot_E(2), Pot_L(3), Pot_H(4), T_Bact(5), T_E(6), T_L(7), T_Mold(8), T_Sep(9), T_Mite(10), T_Targ(11), T_Curl(12), T_Mos(13), T_H(14)
-        M_MAP = {0:19, 1:20, 2:21, 3:22, 4:23, 5:29, 6:30, 7:31, 8:32, 9:33, 10:34, 11:35, 12:36, 13:37, 14:38}
-            
         content = await file.read()
+        nparr = np.frombuffer(content, np.uint8)
+        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            raise HTTPException(status_code=400, detail="Invalid image format.")
         
-        # Specialist inputs
-        img_pil = Image.open(io.BytesIO(content)).convert("RGB")
-        img1 = np.array(img_pil.resize((256, 256)))[np.newaxis, ...]
-        img2 = np.array(img_pil.resize((224, 224)))[:,:,::-1][np.newaxis, ...] # BGR
-        img3 = np.array(img_pil.resize((200, 200)))[np.newaxis, ...]
-        
-        final_scores = np.zeros(39) # Probability accumulator
+        # Ensure precision models are available
+        if 'yolo' not in loaded_models or 'mobilenet' not in loaded_models:
+            raise HTTPException(status_code=503, detail="Precision models not loaded.")
 
-        # Model 1 & 2 (Specialists)
-        for m_id, m_img in [('vision1', img1), ('vision2', img2)]:
-            if m_id in loaded_models:
-                p = loaded_models[m_id].predict(m_img, verbose=0)[0]
-                # Map 15 -> 39
-                for s_idx, g_idx in M_MAP.items():
-                    final_scores[g_idx] += p[s_idx] * 0.5 # Specialists get 0.5 weight each
+        # 1. Detection Phase
+        results = loaded_models['yolo'].predict(source=img_bgr, conf=0.35, verbose=False)
         
-        # Model 3 (Generalist)
-        if 'vision3' in loaded_models:
-            p3 = loaded_models['vision3'].predict(img3, verbose=0)[0]
-            final_scores += p3 * 1.0 # Generalist gets full weight
+        disease_mask = None
+        if 'yolo_seg' in loaded_models:
+            disease_mask = get_disease_mask(loaded_models['yolo_seg'], img_bgr)
+
+        per_leaf = []
+        # Handle cases with or without leaf detection
+        detection_successful = False
+        boxes = []
+        for r in results:
+            if len(r.boxes) > 0:
+                detection_successful = True
+                boxes.extend(r.boxes)
+
+        if not detection_successful:
+            # Fallback: Treat whole image as one leaf
+            h, w = img_bgr.shape[:2]
+            boxes_to_process = [[0, 0, w, h]]
+        else:
+            boxes_to_process = [box.xyxy[0].cpu().numpy() for box in boxes]
+
+        # 2. Classification & Severity Phase
+        for xyxy in boxes_to_process:
+            x1, y1, x2, y2 = [int(v) for v in xyxy]
+            crop = img_bgr[y1:y2, x1:x2]
             
-        # Ensemble: Balanced Triple Voting Strategy
-        # We need to catch diseases (safety) but not cry wolf on healthy plants.
-        
-        # 1. Find the top candidate of EACH category
-        heavy_pathogen_idx = -1
-        heavy_pathogen_score = 0.0
-        
-        healthy_indices = [3, 5, 7, 11, 15, 18, 20, 23, 24, 25, 28, 38]
-        top_healthy_idx = -1
-        top_healthy_score = 0.0
-        
-        for idx in range(39):
-            score = final_scores[idx]
-            if idx in healthy_indices:
-                if score > top_healthy_score:
-                    top_healthy_score = score
-                    top_healthy_idx = idx
-            elif idx != 4: # Not 'Neutral'
-                if score > heavy_pathogen_score:
-                    heavy_pathogen_score = score
-                    heavy_pathogen_idx = idx
+            if crop.size > 0:
+                # Preprocess for MobileNetV2
+                crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                crop_res = cv2.resize(crop_rgb, (224, 224))
+                crop_arr = tf.keras.preprocessing.image.img_to_array(crop_res)
+                crop_prep = tf.keras.applications.mobilenet_v2.preprocess_input(crop_arr)
+                crop_prep = np.expand_dims(crop_prep, 0)
+                
+                # Classify
+                preds = loaded_models['mobilenet'].predict(crop_prep, verbose=0)[0]
+                idx = np.argmax(preds)
+                label = loaded_models['class_names'][idx] if 'class_names' in loaded_models else f"Class {idx}"
+                conf = float(preds[idx])
+                
+                # Severity
+                if disease_mask is not None:
+                    sev = estimate_severity_from_mask(disease_mask, xyxy, img_bgr)
+                else:
+                    sev = estimate_severity_heuristic(crop)
+                    
+                per_leaf.append({
+                    "class": label,
+                    "confidence": conf,
+                    "severity": sev
+                })
 
-        # Decision Logic:
-        # A. If both models are very unsure, pick the highest overall.
-        # B. If we have a strong pathogen (>0.25), use it unless healthy is >0.70.
-        # C. If healthy is strong (>0.60), trust it unless pathogen is also strong (>0.40).
-
-        if heavy_pathogen_idx != -1 and heavy_pathogen_score > 0.25:
-            # Check if healthy is overwhelmingly stronger
-            if top_healthy_score > 0.70 and top_healthy_score > (heavy_pathogen_score * 2):
-                class_idx = top_healthy_idx
-            else:
-                class_idx = heavy_pathogen_idx
+        # 3. Aggregation & Decision
+        # Pick the 'Best' leaf to represent the plant in the UI
+        # Priority: Most severe infection found, or most confident healthy result
+        infected = [l for l in per_leaf if l['severity'] > 3.0]
+        if infected:
+            # Sort by severity to find the most affected leaf
+            best_leaf = sorted(infected, key=lambda x: x['severity'], reverse=True)[0]
         else:
-            # Default to the absolute max (usually healthy if pathogen is weak)
-            class_idx = np.argmax(final_scores)
+            # All healthy or no severe infection, pick most confident
+            best_leaf = sorted(per_leaf, key=lambda x: x['confidence'], reverse=True)[0]
 
-        # Confidence Normalization
-        # Model 1/2 provide 0.5 each, Model 3 provides 1.0. Total possible = 2.0.
-        confidence = float(min(1.0, final_scores[class_idx] / 1.5)) 
-        predicted_label = labels[class_idx]
-        
-        if class_idx == heavy_pathogen_idx:
-            print(f"Balanced Decision: Pathogen {predicted_label} selected (Score: {heavy_pathogen_score:.2f})")
-        else:
-            print(f"Balanced Decision: Healthy {predicted_label} selected (Score: {top_healthy_score:.2f})")
-        
-        # Robust parsing of the output label
-        predicted_label_lower = predicted_label.lower()
-        if "pepper" in predicted_label_lower:
-            plant_type = "Pepper (Bell)"
-            disease_name = predicted_label.split("___")[-1].replace("_", " ") if "___" in predicted_label else predicted_label.replace("Pepper", "").replace("__bell", "").replace("_", " ").strip()
-        elif "potato" in predicted_label_lower:
-            plant_type = "Potato"
-            disease_name = predicted_label.split("___")[-1].replace("_", " ") if "___" in predicted_label else predicted_label.replace("Potato", "").replace("_", " ").strip()
-        elif "tomato" in predicted_label_lower:
-            plant_type = "Tomato"
-            disease_name = predicted_label.split("___")[-1].replace("_", " ") if "___" in predicted_label else predicted_label.replace("Tomato", "").replace("_", " ").strip()
-        else:
-            plant_type = "Vegetable"
-            disease_name = predicted_label.replace("_", " ")
+        total_leaves = len(per_leaf)
+        infected_count = len(infected)
+        avg_severity = np.mean([l['severity'] for l in infected]) if infected_count > 0 else 0.0
 
-        # Logging for debugging
-        print(f"Model Prediction: {predicted_label} (Confidence: {confidence:.4f})")
-
-        # Status determination with higher priority for specific diseases
-        disease_lower = disease_name.lower()
-        if "healthy" in disease_lower:
-            status = "Optimal"
-            advice = f"Your {plant_type} is in excellent health! No pathogens detected. Continue with your current nutrient and light schedule."
-        elif any(x in disease_lower for x in ["virus", "mosaic", "curl"]):
-            status = "Critical"
-            advice = f"Critical: Viral infection ({disease_name}) detected. Viral diseases like Curl Virus are often spread by pests (whiteflies/aphids). Remove the plant to prevent garden-wide spread and check your sticky traps."
-        elif any(x in disease_lower for x in ["blight", "late", "early"]):
-            status = "Critical"
-            advice = f"Critical: {disease_name} detected. This is a severe fungal infection (Blight). Immediately isolate this section, reduce humidity below 60%, and apply an organic copper-based fungicide. Avoid overhead watering."
-        elif "spot" in disease_lower or "mold" in disease_lower:
-            status = "Warning"
-            advice = f"Warning: {disease_name} detected. Remove infected leaves immediately to prevent spreading. Ensure better spacing between plants for airflow and check pH levels in the nutrient solution."
-        elif "mite" in disease_lower:
-            status = "Warning"
-            advice = "Spider mite infestation detected. Use neem oil or a strong water stream (if safe for the plant) to knock them off. Increase humidity slightly, as mites thrive in dry conditions."
+        # Parse plant/disease from label (e.g., "Tomato - Bacterial spot")
+        full_label = best_leaf['class']
+        if " - " in full_label:
+            plant_type, disease_name = full_label.split(" - ")
         else:
-            status = "Warning"
-            advice = f"Detected {disease_name} on {plant_type}. Monitor closely and adjust environmental controls to maintain optimal temperature and humidity."
+            plant_type, disease_name = "Vegetable", full_label
+
+        # 4. Actionable Logic
+        if infected_count == 0 or avg_severity < 4.0:
+            status, spray_tier, dosage = "Optimal", "NO ACTION", 0
+            advice = f"Your {plant_type} is healthy. Continue current regimen."
+        elif avg_severity < 15.0:
+            status, spray_tier, dosage = "Warning", "LOW", 25
+            advice = f"Early {disease_name} signs detected. Apply 25% preventive mist."
+        elif avg_severity < 35.0:
+            status, spray_tier, dosage = "Warning", "MEDIUM", 50
+            advice = f"Moderate {disease_name} infection found. Apply 50% standard spray."
+        else:
+            status, spray_tier, dosage = "Critical", "HIGH", 75
+            advice = f"Severe {disease_name} detection! {avg_severity:.1f}% severity. Immediate 75% spray and isolation required."
 
         return {
             "filename": file.filename,
             "plant_detected": plant_type,
-            "disease": disease_name.replace("Tomato", "").replace("Potato", "").replace("Pepper", "").strip().title(),
+            "disease": disease_name.title(),
             "status": status,
-            "confidence": round(float(confidence), 2),
-            "treatment_plan": advice
+            "confidence": round(best_leaf['confidence'], 2),
+            "treatment_plan": advice,
+            "precision_data": {
+                "total_leaves": total_leaves,
+                "infected_count": infected_count,
+                "avg_severity_pct": round(float(avg_severity), 1),
+                "spray_tier": spray_tier,
+                "dosage_percent": dosage,
+                "individual_leaves": per_leaf[:10]
+            }
         }
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -327,4 +373,4 @@ async def get_model_status():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
