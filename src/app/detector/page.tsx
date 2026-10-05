@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Section from "@/components/Section";
+import { API_BASE } from "@/lib/api";
 import { Upload, Activity, AlertTriangle, ShieldCheck, Thermometer, Brain, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -31,7 +32,7 @@ export default function DetectorPage() {
         formData.append("file", file);
 
         try {
-            const res = await fetch("http://127.0.0.1:8000/detect-disease", {
+            const res = await fetch(`${API_BASE}/detect-disease`, {
                 method: "POST",
                 body: formData,
             });

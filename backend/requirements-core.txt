@@ -1,0 +1,10 @@
+# Control engine + API only (no vision models). Install this first.
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.5
+sqlalchemy>=2.0
+httpx>=0.27
+python-multipart
+numpy
+pillow
+pytest>=8

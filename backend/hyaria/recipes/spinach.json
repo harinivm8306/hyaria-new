@@ -1,0 +1,23 @@
+{
+  "crop": "spinach",
+  "display_name": "Spinach",
+  "note": "Starting values; spinach prefers cooler roots and slightly higher EC.",
+  "cycle_days": 45,
+  "t_base_c": 2.0,
+  "photoperiod": {"start_hour": 6, "hours": 14},
+  "hard_limits": {
+    "ph": [5.5, 7.0], "ec": [0.6, 2.8], "water_temp": [12, 24],
+    "air_temp": [8, 28], "humidity": [35, 90], "water_level": [15, 101]
+  },
+  "stages": [
+    {"name": "Seedling", "from_day": 0, "to_day": 12,
+     "ph": [6.0, 6.5], "ec": [1.0, 1.4], "air_temp": [16, 22], "humidity": [60, 75], "water_temp": [16, 20],
+     "dli": 10, "mist_on_s": 4, "mist_off_min": 5},
+    {"name": "Vegetative", "from_day": 12, "to_day": 28,
+     "ph": [6.0, 6.5], "ec": [1.6, 2.0], "air_temp": [15, 22], "humidity": [55, 70], "water_temp": [16, 20],
+     "dli": 12, "mist_on_s": 4, "mist_off_min": 4},
+    {"name": "Mature", "from_day": 28, "to_day": 999,
+     "ph": [6.0, 6.5], "ec": [1.8, 2.3], "air_temp": [15, 21], "humidity": [50, 65], "water_temp": [16, 20],
+     "dli": 13, "mist_on_s": 5, "mist_off_min": 3}
+  ]
+}

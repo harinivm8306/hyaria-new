@@ -1,316 +1,399 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Section from "@/components/Section";
 import {
-    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, ComposedChart
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea, Legend,
 } from "recharts";
 import {
-    Thermometer, Droplets, Activity, Zap, ShieldCheck, AlertTriangle,
-    RefreshCw, Waves, Brain, Clock, Sprout, Timer, Sun, Moon, Database
+    Thermometer, Droplets, Waves, Zap, ShieldCheck, AlertTriangle, RefreshCw, Sprout,
+    FlaskConical, Gauge, Lightbulb, Timer, Hand, Bot, CloudOff, CheckCircle2, Beaker, Database,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { API_BASE, DEVICE_ID, apiGet, apiPost } from "@/lib/api";
 
-// Provided ThinkSpeak Credentials
-const CHANNEL_ID = "2899533";
-const READ_KEY = "DDZAY6CB184NH6FH";
+type Reading = { value: number | null; raw: number | null; status: string; source: string; ts: number };
+type Live = any;
+type Point = { ts: number; value: number | null };
 
-// Exact Colors from Provided Code
-const COLORS = {
-    air_temp: "#3498db",
-    water_temp: "#2ecc71",
-    humidity: "#9b59b6",
-    pump: "#e74c3c",
+const SENSOR_META: Record<string, { label: string; unit: string; digits: number; icon: React.ReactNode; band?: string }> = {
+    ph: { label: "pH", unit: "", digits: 2, icon: <FlaskConical />, band: "ph" },
+    ec: { label: "EC", unit: " mS/cm", digits: 2, icon: <Beaker />, band: "ec" },
+    water_temp: { label: "Water temp", unit: "°C", digits: 1, icon: <Waves />, band: "water_temp" },
+    air_temp: { label: "Air temp", unit: "°C", digits: 1, icon: <Thermometer />, band: "air_temp" },
+    humidity: { label: "Humidity", unit: "%", digits: 0, icon: <Droplets />, band: "humidity" },
+    water_level: { label: "Tank level", unit: "%", digits: 0, icon: <Gauge /> },
+    light_lux: { label: "Light", unit: " lux", digits: 0, icon: <Lightbulb /> },
 };
 
+const COLORS = { ph: "#10b981", ec: "#3b82f6", air: "#3498db", water: "#2ecc71", hum: "#9b59b6", level: "#f59e0b" };
+
+function fmtTime(ts?: number | null) {
+    if (!ts) return "--";
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function inBand(v: number | null | undefined, band?: number[]) {
+    if (v == null || !band) return true;
+    return v >= band[0] && v <= band[1];
+}
+
 export default function Dashboard() {
-    const [data, setData] = useState<any[]>([]);
-    const [latest, setLatest] = useState<any>(null);
-    const [aiResult, setAiResult] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    const [currentTime, setCurrentTime] = useState(new Date().toLocaleString());
-    const [isDark, setIsDark] = useState(true);
+    const [live, setLive] = useState<Live | null>(null);
+    const [hist, setHist] = useState<Record<string, Point[]>>({});
+    const [actions, setActions] = useState<any[]>([]);
+    const [hours, setHours] = useState(24);
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState<string | null>(null);
+    const [toast, setToast] = useState<string | null>(null);
 
-    const toggleTheme = () => {
-        const newTheme = !isDark;
-        setIsDark(newTheme);
-        if (newTheme) {
-            document.documentElement.classList.add("dark");
-            document.documentElement.classList.remove("light");
-        } else {
-            document.documentElement.classList.remove("dark");
-            document.documentElement.classList.add("light");
-        }
-    };
-
-    const fetchData = async () => {
+    const loadLive = useCallback(async () => {
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-            const res = await fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${READ_KEY}&results=40`, {
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            const json = await res.json();
-
-            if (!res.ok || !json.feeds) throw new Error("API Limit reached");
-
-            const feeds = json.feeds.map((f: any) => ({
-                time: new Date(f.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                temp: parseFloat(f.field2) || 0,
-                hum: parseFloat(f.field1) || 0,
-                waterTemp: parseFloat(f.field3) || 0,
-                pump: parseInt(f.field4) || 0,
-            }));
-
-            setData(feeds);
-            if (feeds.length > 0) {
-                const last = feeds[feeds.length - 1];
-                setLatest(last);
-                getAIRecommendation(last);
-            }
-            setLoading(false);
-        } catch (err) {
-            console.error(err);
-            setLoading(false);
+            const [l, a] = await Promise.all([
+                apiGet(`/api/devices/${DEVICE_ID}/live`),
+                apiGet(`/api/devices/${DEVICE_ID}/actions?limit=25`),
+            ]);
+            setLive(l);
+            setActions(a);
+            setError(null);
+        } catch (e: any) {
+            setError(`Cannot reach the HY-ARIA backend at ${API_BASE}. Start it with: cd backend && python -m uvicorn main:app`);
         }
-    };
-
-    const getAIRecommendation = async (sensorData: any) => {
-        try {
-            const res = await fetch("http://127.0.0.1:8000/predict", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    temperature: sensorData.temp,
-                    humidity: sensorData.hum,
-                    ph: 6.2,
-                    nitrogen: 120,
-                    phosphorus: 80,
-                    potassium: 60,
-                    light_intensity: 35000,
-                    days_planted: 15
-                })
-            });
-            setAiResult(await res.json());
-        } catch (err) { }
-    };
-
-    useEffect(() => {
-        fetchData();
-        const dataInterval = setInterval(fetchData, 15000);
-        const timeInterval = setInterval(() => setCurrentTime(new Date().toLocaleString()), 1000);
-        document.documentElement.classList.add("dark");
-        return () => {
-            clearInterval(dataInterval);
-            clearInterval(timeInterval);
-        };
     }, []);
 
-    if (loading) return (
-        <div className="min-h-screen flex items-center justify-center bg-bg-dark">
-            <RefreshCw className="animate-spin text-primary" size={64} />
-        </div>
-    );
+    const loadHistory = useCallback(async () => {
+        try {
+            setHist(await apiGet(`/api/devices/${DEVICE_ID}/history/all?hours=${hours}`));
+        } catch { /* live error already shown */ }
+    }, [hours]);
+
+    useEffect(() => {
+        loadLive();
+        const t = setInterval(loadLive, 5000);
+        return () => clearInterval(t);
+    }, [loadLive]);
+
+    useEffect(() => {
+        loadHistory();
+        const t = setInterval(loadHistory, 30000);
+        return () => clearInterval(t);
+    }, [loadHistory]);
+
+    const act = async (label: string, fn: () => Promise<any>) => {
+        setBusy(label);
+        try {
+            const r = await fn();
+            if (r?.status && r.status !== "done") setToast(`${label}: ${r.status} — ${r.reason?.split("|").pop()?.trim()}`);
+            else setToast(`${label}: done`);
+            await loadLive();
+        } catch (e: any) {
+            setToast(`${label} failed: ${e.message}`);
+        } finally {
+            setBusy(null);
+            setTimeout(() => setToast(null), 5000);
+        }
+    };
+    const override = (actuator: string, amount: number, label: string) =>
+        act(label, () => apiPost(`/api/devices/${DEVICE_ID}/override`, { actuator, amount }));
+
+    // Merge per-sensor series into rows for the charts
+    const rows = useMemo(() => {
+        const map = new Map<number, any>();
+        for (const [sensor, pts] of Object.entries(hist)) {
+            for (const p of pts || []) {
+                const k = Math.round(p.ts / 60) * 60;
+                const row = map.get(k) || { ts: k, time: fmtTime(k) };
+                row[sensor] = p.value;
+                map.set(k, row);
+            }
+        }
+        return Array.from(map.values()).sort((a, b) => a.ts - b.ts);
+    }, [hist]);
+
+    if (!live && !error) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <RefreshCw className="animate-spin text-primary" size={48} />
+            </div>
+        );
+    }
+
+    const stage = live?.stage;
+    const readings: Record<string, Reading> = live?.readings || {};
+    const health = live?.health || {};
+    const ctrl = live?.controllers || {};
+    const src = live?.data_source || {};
+    const realSensors: string[] = src.real_sensors || (src.name === "thingspeak" ? Object.keys(readings) : []);
+    const isSim = src.name === "simulator" || src.name === "hybrid";
+    const healthColor = health.band === "Good" ? "text-emerald-400" : health.band === "Watch" ? "text-amber-400" : "text-red-400";
+    const nextMistIn = ctrl.misting?.next_mist_at && live ? Math.max(0, Math.round(ctrl.misting.next_mist_at - live.time)) : null;
 
     return (
-        <main className="pt-24 pb-12 min-h-screen transition-all duration-700 bg-background text-foreground">
+        <main className="pt-24 pb-12 min-h-screen bg-background text-foreground">
             <Section>
-                {/* Minimal Header */}
-                <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
-                    <div className="space-y-4">
-                        <div className="flex items-center gap-3">
-                            <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
-                            <span className="text-[10px] font-black uppercase tracking-[0.4em] text-primary">Live IoT Link Active</span>
+                {/* Header */}
+                <div className="flex flex-col md:flex-row justify-between md:items-end mb-10 gap-6">
+                    <div className="space-y-3">
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <span className={`w-2.5 h-2.5 rounded-full ${error ? "bg-red-500" : "bg-primary animate-pulse"}`} />
+                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">
+                                {error ? "Backend offline" : `Control loop live · ${src.name}`}
+                            </span>
+                            {src.thingspeak?.last_error && (
+                                <span className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
+                                    <CloudOff size={12} /> ThingSpeak: {src.thingspeak.last_error.slice(0, 60)}
+                                </span>
+                            )}
                         </div>
-                        <h1 className="text-7xl font-black tracking-tight leading-none uppercase italic">
+                        <h1 className="text-5xl md:text-6xl font-black tracking-tight uppercase italic">
                             HY-ARIA <span className="text-primary not-italic">Dashboard</span>
                         </h1>
-                        <p className="text-sm font-semibold text-text-muted flex items-center gap-4">
-                            <span className="flex items-center gap-1.5"><Database size={14} /> ThinkSpeak Channel {CHANNEL_ID}</span>
-                            <span className="flex items-center gap-1.5"><Clock size={14} /> {currentTime}</span>
-                        </p>
+                        {live && (
+                            <p className="text-sm font-semibold text-text-muted flex flex-wrap items-center gap-4">
+                                <span className="flex items-center gap-1.5"><Sprout size={14} /> {live.crop_name} · {stage?.name} · day {Math.floor(live.day)}</span>
+                                <span className="flex items-center gap-1.5"><Database size={14} /> {live.device_id}</span>
+                                <span>{new Date(live.time * 1000).toLocaleString()}</span>
+                            </p>
+                        )}
                     </div>
-
-                    <button
-                        onClick={toggleTheme}
-                        className="p-6 glass rounded-[2.5rem] hover:scale-105 transition-all shadow-xl group"
-                    >
-                        {isDark ? <Sun className="text-yellow-400" /> : <Moon className="text-blue-600" />}
-                    </button>
+                    <div className="flex items-center gap-3">
+                        {live && (
+                            <button
+                                onClick={() => act(live.auto ? "Switch to manual" : "Switch to auto",
+                                    () => apiPost(`/api/devices/${DEVICE_ID}/mode`, { auto: !live.auto }))}
+                                className={`px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 border transition-all ${live.auto ? "bg-primary/15 border-primary/30 text-primary" : "bg-amber-500/10 border-amber-500/30 text-amber-400"}`}
+                            >
+                                {live.auto ? <Bot size={16} /> : <Hand size={16} />} {live.auto ? "Auto control" : "Manual mode"}
+                            </button>
+                        )}
+                    </div>
                 </div>
 
-                {/* Simplified Metrics Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-                    <SimpleMetric icon={<Droplets />} label="Humidity" value={`${latest?.hum?.toFixed(1)}%`} color={COLORS.humidity} />
-                    <SimpleMetric icon={<Thermometer />} label="Air Temp" value={`${latest?.temp?.toFixed(1)}°C`} color={COLORS.air_temp} />
-                    <SimpleMetric icon={<Waves />} label="Water Temp" value={`${latest?.waterTemp?.toFixed(1)}°C`} color={COLORS.water_temp} />
-                    <PumpIndicator active={latest?.pump === 1} />
-                </div>
+                {error && (
+                    <div className="glass p-6 rounded-3xl border border-red-500/30 bg-red-500/5 mb-8 text-sm font-semibold flex items-center gap-3">
+                        <AlertTriangle className="text-red-400 shrink-0" /> {error}
+                    </div>
+                )}
+                {toast && (
+                    <div className="fixed bottom-6 right-6 z-50 glass px-5 py-4 rounded-2xl border border-primary/30 text-sm font-semibold max-w-md">{toast}</div>
+                )}
 
-                {/* Main Content Layout */}
-                <div className="grid lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-2 space-y-8">
-                        {/* The One Simple Professional Chart */}
-                        <div className="glass p-10 rounded-[3rem] border border-white/5 h-[500px]">
-                            <div className="flex justify-between items-center mb-8">
-                                <h3 className="text-xl font-black uppercase tracking-widest text-foreground">Atmospheric Trends</h3>
-                                <div className="flex gap-4 text-[10px] font-bold text-text-muted">
-                                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{ background: COLORS.humidity }} /> Humidity</div>
-                                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{ background: COLORS.air_temp }} /> Air</div>
-                                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{ background: COLORS.water_temp }} /> Water</div>
+                {live && (
+                    <>
+                        {/* Health + alerts */}
+                        <div className="grid lg:grid-cols-3 gap-6 mb-6">
+                            <div className="glass p-8 rounded-[2rem] flex items-center gap-6">
+                                <div className={`text-6xl font-black ${healthColor}`}>{health.score != null ? Math.round(health.score) : "--"}</div>
+                                <div>
+                                    <div className="text-[10px] font-black uppercase tracking-widest text-text-muted">Plant health</div>
+                                    <div className={`text-2xl font-black ${healthColor}`}>{health.band}</div>
+                                    <div className="text-sm text-text-muted mt-1">{health.reason}</div>
                                 </div>
                             </div>
-                            <div className="h-[350px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={data}>
-                                        <CartesianGrid strokeDasharray="5 5" stroke="var(--grid-color)" vertical={false} opacity={0.3} />
-                                        <XAxis dataKey="time" hide />
-                                        <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} />
-                                        <Tooltip
-                                            contentStyle={{ backgroundColor: 'var(--card-bg)', border: '1px solid var(--glass-border)', borderRadius: '1.5rem', boxShadow: '0 20px 40px -10px rgba(0,0,0,0.5)' }}
-                                            labelStyle={{ display: 'none' }}
-                                        />
-                                        <Line name="Humidity" type="monotone" dataKey="hum" stroke={COLORS.humidity} strokeWidth={3} dot={false} animationDuration={1000} />
-                                        <Line name="Air Temp" type="monotone" dataKey="temp" stroke={COLORS.air_temp} strokeWidth={3} dot={false} animationDuration={1000} />
-                                        <Line name="Water Temp" type="monotone" dataKey="waterTemp" stroke={COLORS.water_temp} strokeWidth={3} dot={false} animationDuration={1000} />
+                            <div className="glass p-8 rounded-[2rem] lg:col-span-2">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-[10px] font-black uppercase tracking-widest text-text-muted">Active alerts</h3>
+                                    <span className="text-xs font-bold text-text-muted">{live.alerts.length}</span>
+                                </div>
+                                {live.alerts.length === 0 ? (
+                                    <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm"><CheckCircle2 size={18} /> All clear</div>
+                                ) : (
+                                    <ul className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                                        {live.alerts.map((a: any) => (
+                                            <li key={a.id} className={`flex items-start justify-between gap-3 p-3 rounded-xl border ${a.severity === "critical" ? "border-red-500/30 bg-red-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
+                                                <div className="flex gap-2 text-sm">
+                                                    <AlertTriangle size={16} className={`shrink-0 mt-0.5 ${a.severity === "critical" ? "text-red-400" : "text-amber-400"}`} />
+                                                    <span><span className="font-bold">{a.message}</span> <span className="text-text-muted text-xs">since {fmtTime(a.ts)}</span></span>
+                                                </div>
+                                                {!a.acknowledged ? (
+                                                    <button onClick={() => act("Acknowledge", () => apiPost(`/api/alerts/${a.id}/ack`))}
+                                                        className="text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 shrink-0">Ack</button>
+                                                ) : <span className="text-[10px] text-text-muted shrink-0">acked</span>}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Sensor cards */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4 mb-6">
+                            {Object.entries(SENSOR_META).map(([key, m]) => {
+                                const r = readings[key];
+                                const band = m.band ? stage?.[m.band] : undefined;
+                                const ok = r?.status === "OK";
+                                const good = ok && inBand(r?.value, band);
+                                const real = realSensors.includes(key);
+                                return (
+                                    <div key={key} className={`glass p-5 rounded-[1.5rem] border ${!ok ? "border-red-500/40" : good ? "border-white/5" : "border-amber-500/40"}`}>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-text-muted [&>svg]:w-4 [&>svg]:h-4">{m.icon}</span>
+                                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${real ? "bg-emerald-500/15 text-emerald-400" : "bg-blue-500/15 text-blue-400"}`}>
+                                                {real ? "real" : "sim"}
+                                            </span>
+                                        </div>
+                                        <div className="text-[10px] font-black uppercase tracking-widest text-text-muted">{m.label}</div>
+                                        <div className="text-2xl font-black mt-1">
+                                            {r?.value != null ? r.value.toFixed(m.digits) : "--"}<span className="text-sm text-text-muted">{m.unit}</span>
+                                        </div>
+                                        <div className="text-[10px] text-text-muted mt-1">
+                                            {!ok ? <span className="text-red-400 font-bold">{r?.status || "no data"}</span> : band ? `target ${band[0]}–${band[1]}` : " "}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <div className="grid lg:grid-cols-3 gap-6">
+                            {/* Charts */}
+                            <div className="lg:col-span-2 space-y-6">
+                                <div className="flex gap-2">
+                                    {[6, 24, 72].map((h) => (
+                                        <button key={h} onClick={() => setHours(h)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-black ${hours === h ? "bg-primary text-white" : "glass text-text-muted"}`}>{h} h</button>
+                                    ))}
+                                </div>
+                                <ChartCard title="Nutrient solution" note="Shaded areas are the recipe target bands">
+                                    <LineChart data={rows}>
+                                        <CartesianGrid strokeDasharray="4 4" stroke="var(--grid-color)" vertical={false} />
+                                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} minTickGap={40} />
+                                        <YAxis yAxisId="ph" domain={[5, 7.5]} stroke={COLORS.ph} fontSize={10} width={36} />
+                                        <YAxis yAxisId="ec" orientation="right" domain={[0, 2.5]} stroke={COLORS.ec} fontSize={10} width={36} />
+                                        {stage && <ReferenceArea yAxisId="ph" y1={stage.ph[0]} y2={stage.ph[1]} fill={COLORS.ph} fillOpacity={0.08} />}
+                                        {stage && <ReferenceArea yAxisId="ec" y1={stage.ec[0]} y2={stage.ec[1]} fill={COLORS.ec} fillOpacity={0.08} />}
+                                        <Tooltip contentStyle={{ backgroundColor: "var(--card-bg)", border: "1px solid var(--glass-border)", borderRadius: 12 }} />
+                                        <Legend />
+                                        <Line yAxisId="ph" name="pH" dataKey="ph" stroke={COLORS.ph} strokeWidth={2} dot={false} connectNulls />
+                                        <Line yAxisId="ec" name="EC (mS/cm)" dataKey="ec" stroke={COLORS.ec} strokeWidth={2} dot={false} connectNulls />
                                     </LineChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
+                                </ChartCard>
+                                <ChartCard title="Climate and root zone">
+                                    <LineChart data={rows}>
+                                        <CartesianGrid strokeDasharray="4 4" stroke="var(--grid-color)" vertical={false} />
+                                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} minTickGap={40} />
+                                        <YAxis yAxisId="t" stroke="var(--text-muted)" fontSize={10} width={36} unit="°" />
+                                        <YAxis yAxisId="p" orientation="right" domain={[0, 100]} stroke="var(--text-muted)" fontSize={10} width={36} unit="%" />
+                                        <Tooltip contentStyle={{ backgroundColor: "var(--card-bg)", border: "1px solid var(--glass-border)", borderRadius: 12 }} />
+                                        <Legend />
+                                        <Line yAxisId="t" name="Air °C" dataKey="air_temp" stroke={COLORS.air} strokeWidth={2} dot={false} connectNulls />
+                                        <Line yAxisId="t" name="Water °C" dataKey="water_temp" stroke={COLORS.water} strokeWidth={2} dot={false} connectNulls />
+                                        <Line yAxisId="p" name="Humidity %" dataKey="humidity" stroke={COLORS.hum} strokeWidth={2} dot={false} connectNulls />
+                                        <Line yAxisId="p" name="Tank %" dataKey="water_level" stroke={COLORS.level} strokeWidth={2} dot={false} connectNulls />
+                                    </LineChart>
+                                </ChartCard>
 
-                        {/* Hardware Pulse Log (Simple) */}
-                        <div className="glass p-8 rounded-[2.5rem] border border-white/5 h-[200px]">
-                            <h3 className="text-sm font-black uppercase tracking-[0.2em] mb-6 opacity-40">Hardware Actuators</h3>
-                            <div className="h-20">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={data}>
-                                        <Area type="stepAfter" dataKey="pump" stroke={COLORS.pump} fill={COLORS.pump} fillOpacity={0.1} strokeWidth={2} />
-                                    </AreaChart>
-                                </ResponsiveContainer>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* AI Insights (Neat Sidebar) */}
-                    <div className="space-y-6">
-                        <div className="glass p-10 rounded-[3rem] border border-primary/20 bg-primary/5 min-h-[400px] flex flex-col justify-between">
-                            <div>
-                                <h3 className="text-2xl font-black mb-6 flex items-center gap-3 text-foreground">
-                                    <Brain className="text-primary" /> AI Advice
-                                </h3>
-                                <div className="space-y-4">
-                                    <InsightRow icon={<Sprout className="text-emerald-400" />} label="Stage" value={aiResult?.optimization?.current_stage || "---"} />
-                                    <InsightRow icon={<ShieldCheck className="text-primary" />} label="Health" value={aiResult?.optimization?.crop_health_status || "---"} />
-                                    <InsightRow icon={<Zap className="text-yellow-400" />} label="Dose" value={`${aiResult?.optimization?.nutrient_dose_ml || "--"} ml`} />
+                                {/* Action log */}
+                                <div className="glass p-6 rounded-[2rem]">
+                                    <h3 className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-4">What the system did</h3>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-xs">
+                                            <thead className="text-text-muted text-left">
+                                                <tr><th className="py-2 pr-3">Time</th><th className="pr-3">Action</th><th className="pr-3">By</th><th className="pr-3">Status</th><th>Why</th></tr>
+                                            </thead>
+                                            <tbody>
+                                                {actions.map((a) => (
+                                                    <tr key={a.id} className="border-t border-white/5 align-top">
+                                                        <td className="py-2 pr-3 whitespace-nowrap">{fmtTime(a.ts)}</td>
+                                                        <td className="pr-3 whitespace-nowrap font-bold">{a.actuator} {a.amount}{a.unit}</td>
+                                                        <td className="pr-3">{a.source}</td>
+                                                        <td className={`pr-3 font-bold ${a.status === "done" ? "text-emerald-400" : a.status === "advisory" ? "text-blue-400" : "text-red-400"}`}>{a.status}</td>
+                                                        <td className="text-text-muted">{a.reason}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="mt-10 pt-10 border-t border-white/5">
-                                <p className="text-sm font-medium leading-relaxed italic text-text-muted">
-                                    "{aiResult?.recommendation || "Analyzing current telemetrics for optimization..."}"
-                                </p>
-                            </div>
-                        </div>
+                            {/* Right column: controllers + manual control */}
+                            <div className="space-y-6">
+                                <div className="glass p-6 rounded-[2rem] border border-primary/20 bg-primary/5 space-y-4">
+                                    <h3 className="text-lg font-black flex items-center gap-2"><ShieldCheck className="text-primary" size={20} /> Controllers</h3>
+                                    <Row icon={<Timer size={16} />} label="Next mist" value={nextMistIn != null ? `${Math.floor(nextMistIn / 60)}m ${nextMistIn % 60}s` : "--"} sub={ctrl.misting?.why} />
+                                    <Row icon={<Beaker size={16} />} label="Dosing"
+                                        value={ctrl.dosing?.mixing_until ? `mixing (${ctrl.dosing.pending})` : "idle"}
+                                        sub={`learned gains: nutrient ${ctrl.dosing?.k_ec}, pH-down ${ctrl.dosing?.b_down}, pH-up ${ctrl.dosing?.b_up}`} />
+                                    <Row icon={<Lightbulb size={16} />} label="LED"
+                                        value={ctrl.lighting?.pwm != null ? `${ctrl.lighting.pwm}%` : "--"}
+                                        sub={ctrl.lighting?.dli_target ? `DLI ${ctrl.lighting.dli_so_far} of ${ctrl.lighting.dli_target} mol/m²/day` : undefined} />
+                                    <Row icon={<Droplets size={16} />} label="VPD" value={live.vpd_kpa != null ? `${live.vpd_kpa} kPa` : "--"} />
+                                    {live.notes?.length > 0 && <p className="text-xs text-text-muted italic">{live.notes.join(" · ")}</p>}
+                                </div>
 
-                        <div className="glass p-10 rounded-[3rem] border border-white/5">
-                            <h4 className="text-[10px] font-black uppercase tracking-widest text-text-muted opacity-40 mb-4">Integrations</h4>
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold">ThinkSpeak SSL</span>
-                                <div className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[8px] font-black uppercase rounded">Secure</div>
+                                <div className="glass p-6 rounded-[2rem] space-y-3">
+                                    <h3 className="text-lg font-black flex items-center gap-2"><Hand size={20} className="text-amber-400" /> Manual control</h3>
+                                    <p className="text-xs text-text-muted">Every command passes the safety interlocks first.</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <Btn busy={busy} label="Mist 5 s" onClick={() => override("mist", 5, "Mist 5 s")} />
+                                        <Btn busy={busy} label="Add water 2 L" onClick={() => override("water_add", 2, "Add water 2 L")} />
+                                        <Btn busy={busy} label="Nutrient A+B 5 ml" onClick={async () => {
+                                            await override("dose_a", 5, "Dose A 5 ml");
+                                            await override("dose_b", 5, "Dose B 5 ml");
+                                        }} />
+                                        <Btn busy={busy} label="pH down 2 ml" onClick={() => override("ph_down", 2, "pH down 2 ml")} />
+                                        <Btn busy={busy} label="pH up 2 ml" onClick={() => override("ph_up", 2, "pH up 2 ml")} />
+                                        <Btn busy={busy} label="LED off" onClick={() => override("led", 0, "LED off")} />
+                                    </div>
+                                </div>
+
+                                {isSim && (
+                                    <div className="glass p-6 rounded-[2rem] space-y-3">
+                                        <h3 className="text-sm font-black uppercase tracking-widest text-text-muted flex items-center gap-2"><Zap size={16} /> Demo: inject a fault</h3>
+                                        <p className="text-xs text-text-muted">Shows how alerts and safety respond. Affects only simulated parts.</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {[["pump_fail", "Pump failure"], ["ph_stuck", "pH probe stuck"], ["leak", "Tank leak"], ["heatwave", "Heatwave"]].map(([f, label]) => {
+                                                const on = (src.simulator?.faults || src.faults || []).includes(f);
+                                                return (
+                                                    <button key={f} disabled={!!busy}
+                                                        onClick={() => act(`${label} ${on ? "off" : "on"}`, () => apiPost(`/api/sim/fault`, { fault: f, on: !on }))}
+                                                        className={`px-3 py-2 rounded-xl text-xs font-bold border ${on ? "bg-red-500/15 border-red-500/40 text-red-400" : "bg-white/5 border-white/10"}`}>
+                                                        {label}{on ? " (on)" : ""}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
-                    </div>
-                </div>
+                    </>
+                )}
             </Section>
         </main>
     );
 }
 
-function SimpleMetric({ icon, label, value, color }: any) {
+function ChartCard({ title, note, children }: { title: string; note?: string; children: React.ReactElement }) {
     return (
-        <div className="glass p-8 rounded-[2.5rem] border border-white/5 flex items-center gap-6">
-            <div className="p-4 bg-white/5 rounded-2xl" style={{ color }}>{icon}</div>
-            <div>
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-1">{label}</h4>
-                <div className="text-3xl font-black text-foreground">{value}</div>
+        <div className="glass p-6 rounded-[2rem]">
+            <div className="flex justify-between items-baseline mb-4">
+                <h3 className="text-sm font-black uppercase tracking-widest">{title}</h3>
+                {note && <span className="text-[10px] text-text-muted">{note}</span>}
+            </div>
+            <div className="h-[280px]">
+                <ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer>
             </div>
         </div>
     );
 }
 
-function PumpIndicator({ active }: any) {
+function Row({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
     return (
-        <div className={`p-8 rounded-[2.5rem] border flex items-center gap-6 transition-all ${active ? 'bg-primary/10 border-primary/20' : 'glass'}`}>
-            <div className={`p-4 rounded-2xl ${active ? 'bg-primary/20 text-primary' : 'bg-white/5 text-text-muted'}`}><Zap /></div>
-            <div>
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-1">Pump</h4>
-                <div className={`text-3xl font-black ${active ? 'text-primary' : 'text-foreground'}`}>{active ? "Running" : "Idle"}</div>
+        <div>
+            <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2 text-sm text-text-muted">{icon} {label}</span>
+                <span className="font-black">{value}</span>
             </div>
+            {sub && <p className="text-[11px] text-text-muted mt-0.5">{sub}</p>}
         </div>
     );
 }
 
-
-
-function PumpCard({ active }: { active: boolean }) {
+function Btn({ label, onClick, busy }: { label: string; onClick: () => void; busy: string | null }) {
     return (
-        <motion.div
-            whileHover={{ y: -5, scale: 1.02 }}
-            className={`p-8 rounded-[2.5rem] border transition-all ${active ? 'bg-primary/5 border-primary/20' : 'bg-white/[0.02] border-white/5'}`}
-        >
-            <div className="flex justify-between items-start mb-6">
-                <div className={`p-3.5 rounded-2xl ${active ? 'bg-primary/20' : 'bg-white/5'}`}>
-                    <Zap className={active ? 'text-primary' : 'text-text-muted'} />
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${active ? 'bg-primary animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-white/20'}`} />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-text-muted">Pulse</span>
-                </div>
-            </div>
-            <h4 className="text-xs font-bold text-text-muted mb-1 uppercase tracking-widest">Actuator Status</h4>
-            <div className={`text-4xl font-black mb-2 tracking-tight ${active ? 'text-primary' : 'text-white'}`}>
-                {active ? "Misting" : "Standby"}
-            </div>
-            <p className="text-[10px] font-bold text-text-muted/60">Pump logic: AI-Gated PWM</p>
-        </motion.div>
-    );
-}
-
-function HealthStatusCard({ status, confidence }: any) {
-    const isOptimal = status === "Optimal" || status === "Healthy";
-    return (
-        <div className={`p-8 rounded-[2.5rem] border flex items-center justify-between ${isOptimal ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-primary/10 border-primary/20'}`}>
-            <div>
-                <h4 className="text-xs font-black uppercase tracking-widest text-text-muted mb-1">Crop Vigor</h4>
-                <div className={`text-2xl font-black ${isOptimal ? 'text-emerald-400' : 'text-primary'}`}>{status}</div>
-                <p className="text-[10px] font-bold text-text-muted mt-1">{(confidence * 100).toFixed(1)}% AI Integrity</p>
-            </div>
-            <div className={`w-14 h-14 rounded-full flex items-center justify-center ${isOptimal ? 'bg-emerald-500/20 text-emerald-400' : 'bg-primary/20 text-primary'}`}>
-                {isOptimal ? <ShieldCheck size={28} /> : <AlertTriangle size={28} />}
-            </div>
-        </div>
-    );
-}
-
-function InsightRow({ icon, label, value }: any) {
-    return (
-        <div className="flex items-center justify-between p-4 bg-white/[0.03] hover:bg-white/[0.06] rounded-2xl border border-white/5 transition-colors">
-            <div className="flex items-center gap-3">
-                <div className="p-2 bg-white/5 rounded-lg">{icon}</div>
-                <span className="text-xs font-bold text-text-muted">{label}</span>
-            </div>
-            <span className="text-sm font-black text-white">{value}</span>
-        </div>
-    );
-}
-
-function MetadataItem({ label, value }: any) {
-    return (
-        <div className="flex justify-between items-center text-[10px]">
-            <span className="text-text-muted font-bold">{label}</span>
-            <span className="text-white/60 font-mono">{value}</span>
-        </div>
+        <button disabled={!!busy} onClick={onClick}
+            className="px-3 py-2.5 rounded-xl text-xs font-bold bg-white/5 hover:bg-primary/15 hover:text-primary border border-white/10 disabled:opacity-50 transition-all">
+            {label}
+        </button>
     );
 }

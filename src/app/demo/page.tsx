@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Section from "@/components/Section";
+import { API_BASE } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Camera, ShieldCheck, AlertCircle, RefreshCcw,
@@ -58,7 +59,7 @@ export default function DemoPage() {
             const formData = new FormData();
             const blob = await (await fetch(diseaseImage)).blob();
             formData.append("file", blob, "leaf.jpg");
-            const res = await fetch("http://127.0.0.1:8000/detect-disease", { method: "POST", body: formData });
+            const res = await fetch(`${API_BASE}/detect-disease`, { method: "POST", body: formData });
             setDiseaseResult(await res.json());
         } catch (err) { console.error(err); }
         finally { setDiseaseLoading(false); }
@@ -71,7 +72,7 @@ export default function DemoPage() {
             const formData = new FormData();
             const blob = await (await fetch(stageImage)).blob();
             formData.append("file", blob, "plant.jpg");
-            const res = await fetch("http://127.0.0.1:8000/predict-stage", { method: "POST", body: formData });
+            const res = await fetch(`${API_BASE}/predict-stage`, { method: "POST", body: formData });
             setStageResult(await res.json());
         } catch (err) { console.error(err); }
         finally { setStageLoading(false); }
@@ -271,21 +272,21 @@ export default function DemoPage() {
                                                         {stageResult.stage}
                                                     </h3>
                                                     <p className="text-xs text-text-muted font-bold uppercase tracking-widest">
-                                                        {(stageResult.confidence * 100).toFixed(0)}% Confidence
+                                                        {stageResult.image_metrics.green_coverage_pct}% canopy cover
                                                     </p>
                                                 </div>
                                             </div>
 
-                                            {/* Confidence Bar */}
+                                            {/* Canopy cover bar (measured, not a model confidence) */}
                                             <div>
                                                 <div className="flex justify-between text-xs text-text-muted mb-1.5">
-                                                    <span>AI Confidence</span>
-                                                    <span className="font-bold" style={{ color: stageResult.color }}>{(stageResult.confidence * 100).toFixed(0)}%</span>
+                                                    <span>Canopy cover</span>
+                                                    <span className="font-bold" style={{ color: stageResult.color }}>{stageResult.image_metrics.green_coverage_pct}%</span>
                                                 </div>
                                                 <div className="h-2 bg-white/10 rounded-full overflow-hidden">
                                                     <motion.div
                                                         initial={{ width: 0 }}
-                                                        animate={{ width: `${stageResult.confidence * 100}%` }}
+                                                        animate={{ width: `${Math.min(100, stageResult.image_metrics.green_coverage_pct)}%` }}
                                                         transition={{ duration: 0.8, ease: "easeOut" }}
                                                         className="h-full rounded-full"
                                                         style={{ background: stageResult.color }}
@@ -316,7 +317,7 @@ export default function DemoPage() {
                                                 </div>
                                             </div>
 
-                                            <p className="text-[10px] text-text-muted">Model ID: HY-ARIA-STAGE-V1 · Image analysis via spectral green-channel decomposition</p>
+                                            <p className="text-[10px] text-text-muted">Method: green-pixel ratio heuristic (calibrated canopy tracking comes in Phase 2)</p>
                                         </motion.div>
                                     )}
                                 </div>

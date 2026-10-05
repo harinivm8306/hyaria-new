@@ -54,3 +54,8 @@ ENV/
 
 # vscode
 .vscode/
+!.env.example
+!backend/.env.example
+
+# local databases
+*.db

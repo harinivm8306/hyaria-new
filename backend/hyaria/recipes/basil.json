@@ -1,0 +1,23 @@
+{
+  "crop": "basil",
+  "display_name": "Basil",
+  "note": "Starting values; basil likes warmth and more light.",
+  "cycle_days": 50,
+  "t_base_c": 10.0,
+  "photoperiod": {"start_hour": 6, "hours": 16},
+  "hard_limits": {
+    "ph": [5.3, 7.0], "ec": [0.5, 2.2], "water_temp": [16, 27],
+    "air_temp": [14, 34], "humidity": [35, 90], "water_level": [15, 101]
+  },
+  "stages": [
+    {"name": "Seedling", "from_day": 0, "to_day": 12,
+     "ph": [5.8, 6.3], "ec": [0.8, 1.1], "air_temp": [22, 27], "humidity": [60, 75], "water_temp": [19, 23],
+     "dli": 12, "mist_on_s": 4, "mist_off_min": 5},
+    {"name": "Vegetative", "from_day": 12, "to_day": 30,
+     "ph": [5.8, 6.3], "ec": [1.1, 1.5], "air_temp": [21, 27], "humidity": [50, 70], "water_temp": [19, 23],
+     "dli": 16, "mist_on_s": 4, "mist_off_min": 4},
+    {"name": "Mature", "from_day": 30, "to_day": 999,
+     "ph": [5.8, 6.3], "ec": [1.3, 1.6], "air_temp": [20, 27], "humidity": [45, 65], "water_temp": [19, 23],
+     "dli": 18, "mist_on_s": 5, "mist_off_min": 3}
+  ]
+}

@@ -1,12 +1,9 @@
-fastapi
-uvicorn
+# Full backend: control engine + vision (disease detection) + legacy models
+-r requirements-core.txt
 pandas
-numpy
 scikit-learn
-tensorflow
-python-multipart
-pydantic
 scipy
-kagglehub
-pillow
+tensorflow
+opencv-python
 ultralytics
+kagglehub

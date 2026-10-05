@@ -1,27 +1,59 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from pydantic import BaseModel
-import pickle
-import os
+"""HY-ARIA backend: control engine + farmer API (/api/...) + vision endpoints."""
 import io
-import numpy as np
-from fastapi.middleware.cors import CORSMiddleware
-import random
-from PIL import Image
-import json
-import tensorflow as tf
-from tensorflow.keras.models import load_model, model_from_json
-import cv2
-from ultralytics import YOLO
-import time
+import logging
+import os
+import pickle
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="HY-ARIA AI Backend")
+import numpy as np
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
+from pydantic import BaseModel
+
+from hyaria import api as hyaria_api
+from hyaria.config import settings
+from hyaria.engine import Engine
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("hyaria")
+
+# Heavy vision libraries are optional: the control API runs without them.
+try:
+    import cv2
+    import tensorflow as tf
+    from tensorflow.keras.models import load_model
+    from ultralytics import YOLO
+    VISION_AVAILABLE = True
+except Exception as exc:  # pragma: no cover - depends on local install
+    log.warning("Vision libraries not available (%s); /detect-disease disabled", exc)
+    VISION_AVAILABLE = False
+
+engine = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global engine
+    engine = Engine(settings)
+    hyaria_api.bind_engine(engine)
+    if settings.start_engine:
+        engine.start()
+        log.info("Control engine started (source=%s, device=%s, crop=%s)",
+                 settings.data_source, settings.device_id, engine.cycle["crop"])
+    yield
+    engine.stop()
+
+
+app = FastAPI(title="HY-ARIA AI Backend", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(hyaria_api.router)
 
 # Individual Model Paths
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
@@ -48,6 +80,8 @@ def load_all_models():
             else:
                 print(f"Warning: {filename} not found.")
 
+        if not VISION_AVAILABLE:
+            return
         # Load Vision models (Triple Ensemble)
         vision_path1 = os.path.join(MODELS_DIR, 'model.h5')
         vision_path2 = os.path.join(MODELS_DIR, 'model2.h5')
@@ -109,14 +143,17 @@ class SensorData(BaseModel):
 @app.get("/")
 def read_root():
     return {
-        "status": "HY-ARIA AI Backend is running", 
-        "models_loaded": len(loaded_models) >= len(model_files)
+        "status": "HY-ARIA AI Backend is running",
+        "control_api": "/api/status",
+        "legacy_models_loaded": all(k in loaded_models for k in model_files),
+        "vision_available": VISION_AVAILABLE and "mobilenet" in loaded_models,
     }
 
 @app.post("/predict")
 async def predict_optimization(data: SensorData):
-    if len(loaded_models) < len(model_files):
-        raise HTTPException(status_code=503, detail="Some models are not loaded.")
+    if not all(k in loaded_models for k in model_files):
+        raise HTTPException(status_code=503, detail="Legacy models not trained: run `python -m models.train` in backend/. "
+                                                    "The live control loop at /api does not need them.")
     
     input_data = np.array([[
         data.temperature,
@@ -145,7 +182,6 @@ async def predict_optimization(data: SensorData):
             "crop_health_status": str(health),
             "current_stage": str(stage),
             "days_to_harvest": float(f"{float(days_to_harvest):.1f}"),
-            "confidence": 0.98
         },
         "recommendation": f"System in {str(stage)} stage. {'Keep optimal lighting.' if data.light_intensity > 25000 else 'Increase light intensity.'}"
     }
@@ -206,6 +242,8 @@ def estimate_severity_from_mask(disease_mask, box, img_bgr):
 
 @app.post("/detect-disease")
 async def detect_disease(file: UploadFile = File(...)):
+    if not VISION_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Vision libraries (tensorflow, ultralytics, opencv) not installed.")
     try:
         content = await file.read()
         nparr = np.frombuffer(content, np.uint8)
@@ -323,11 +361,10 @@ async def detect_disease(file: UploadFile = File(...)):
                 "individual_leaves": per_leaf[:10]
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        print(f"Error: {e}")
+        log.exception("detect-disease failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/predict-stage")
@@ -356,11 +393,15 @@ async def predict_stage_from_image(file: UploadFile = File(...)):
     return {
         "filename": file.filename,
         "stage": stage,
-        "confidence": 0.95,
+        "method": "green-pixel ratio heuristic (replaced by calibrated canopy tracking in Phase 2)",
         "description": desc,
         "days_range": days,
         "color": color,
-        "image_metrics": { "green_coverage_pct": round(green_ratio * 100, 1) }
+        "image_metrics": {
+            "green_coverage_pct": round(green_ratio * 100, 1),
+            "avg_leaf_brightness": round(float(np.mean(arr[green_mask])) if np.any(green_mask) else 0.0, 1),
+            "leaf_texture_complexity": round(green_std, 1),
+        }
     }
 
 @app.get("/model-status")
@@ -373,4 +414,4 @@ async def get_model_status():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=os.getenv("HOST", "0.0.0.0"), port=int(os.getenv("PORT", "8000")))
