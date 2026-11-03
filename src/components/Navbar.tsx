@@ -1,145 +1,139 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Leaf, Sun, Moon } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Menu, Moon, Sun, X } from "lucide-react";
+import Logo from "@/components/Logo";
 
-const navLinks = [
-  { name: "Home", href: "/" },
-  { name: "Problems", href: "/problem" },
-  { name: "Solution", href: "/solution" },
+const primary = [
+  { name: "Overview", href: "/" },
+  { name: "Command Centre", href: "/dashboard" },
+  { name: "Disease Lab", href: "/detector" },
   { name: "Architecture", href: "/architecture" },
+  { name: "AI", href: "/ai" },
+];
+
+const more = [
+  { name: "Problem", href: "/problem" },
+  { name: "Solution", href: "/solution" },
   { name: "Features", href: "/features" },
-  { name: "Disease Detector", href: "/detector" },
-  { name: "Live Dashboard", href: "/dashboard" },
-  { name: "AI Tech", href: "/ai" },
   { name: "Prototype", href: "/prototype" },
   { name: "Results", href: "/results" },
-  { name: "About Team", href: "/team" },
+  { name: "Research", href: "/research" },
+  { name: "Dataset", href: "/dataset" },
+  { name: "Impact", href: "/impact" },
+  { name: "Team", href: "/team" },
+  { name: "Contact", href: "/contact" },
 ];
 
 export default function Navbar() {
-  const [isOpen, setIsOpen] = useState(false);
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [isDark, setIsDark] = useState(true);
+  const [dark, setDark] = useState(true);
 
   useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 20);
-    };
-    window.addEventListener("scroll", handleScroll);
-
-    // Check initial theme from HTML class or localStorage
-    const isDarkMode = document.documentElement.classList.contains("dark");
-    setIsDark(isDarkMode);
-
-    return () => window.removeEventListener("scroll", handleScroll);
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    let saved: string | null = null;
+    try { saved = localStorage.getItem("hyaria-theme"); } catch { /* storage blocked */ }
+    if (saved === "light") applyTheme(false);
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const toggleTheme = () => {
-    const newTheme = !isDark;
-    setIsDark(newTheme);
-    if (newTheme) {
-      document.documentElement.classList.add("dark");
-      document.documentElement.classList.remove("light");
-    } else {
-      document.documentElement.classList.remove("dark");
-      document.documentElement.classList.add("light");
-    }
+  useEffect(() => setOpen(false), [pathname]);
+
+  const applyTheme = (isDark: boolean) => {
+    setDark(isDark);
+    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("light", !isDark);
+    try { localStorage.setItem("hyaria-theme", isDark ? "dark" : "light"); } catch { /* ignore */ }
   };
 
   return (
-    <nav
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "py-3 bg-background/80 backdrop-blur-md border-b border-glass-border shadow-sm" : "py-5 bg-transparent"
+    <header className="fixed top-0 inset-x-0 z-50 px-4 pt-3">
+      <nav
+        className={`mx-auto max-w-6xl flex items-center justify-between rounded-full pl-4 pr-2 py-2 transition-all duration-500 ${
+          scrolled ? "glass shadow-[0_10px_40px_-15px_rgba(0,0,0,0.6)]" : "border border-transparent"
         }`}
-    >
-      <div className="container mx-auto px-6 flex justify-between items-center">
-        <Link href="/" className="flex items-center gap-2 group">
-          <div className="p-2 bg-primary/20 rounded-lg group-hover:bg-primary/30 transition-colors">
-            <Leaf className="w-6 h-6 text-primary" />
-          </div>
-          <span className="text-xl font-bold tracking-tight text-foreground">
-            HY-<span className="text-primary">ARIA</span>
+      >
+        <Link href="/" className="flex items-center gap-2.5" aria-label="HY-ARIA home">
+          <Logo className="w-7 h-7" />
+          <span className="font-display text-[17px] font-bold tracking-tight">
+            HY<span className="text-faint">·</span>ARIA
           </span>
         </Link>
 
-        {/* Desktop Nav */}
-        <div className="hidden lg:flex items-center gap-8">
-          {navLinks.slice(0, 7).map((link) => (
-            <Link
-              key={link.name}
-              href={link.href}
-              className="text-sm font-medium text-text-muted hover:text-primary transition-colors"
-            >
-              {link.name}
-            </Link>
-          ))}
-
-          <button
-            onClick={toggleTheme}
-            className="p-2 glass rounded-xl hover:scale-110 transition-all text-foreground"
-            aria-label="Toggle Theme"
-          >
-            {isDark ? <Sun size={18} className="text-yellow-400" /> : <Moon size={18} className="text-blue-600" />}
+        <div className="hidden lg:flex items-center gap-1">
+          {primary.map((l) => {
+            const active = l.href === "/" ? pathname === "/" : pathname?.startsWith(l.href);
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                className={`relative px-3.5 py-2 text-[13px] font-medium rounded-full transition-colors ${
+                  active ? "text-foreground" : "text-text-muted hover:text-foreground"
+                }`}
+              >
+                {active && (
+                  <motion.span layoutId="nav-pill" className="absolute inset-0 rounded-full bg-card-2 border border-line" transition={{ type: "spring", stiffness: 380, damping: 32 }} />
+                )}
+                <span className="relative">{l.name}</span>
+              </Link>
+            );
+          })}
+          <button onClick={() => setOpen((v) => !v)} className="px-3.5 py-2 text-[13px] font-medium text-text-muted hover:text-foreground rounded-full">
+            More
           </button>
+        </div>
 
-          <Link
-            href="/dashboard"
-            className="px-5 py-2 bg-primary hover:bg-primary-dark text-white rounded-full text-sm font-semibold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-primary/20"
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => applyTheme(!dark)}
+            className="w-9 h-9 grid place-items-center rounded-full text-text-muted hover:text-foreground hover:bg-card-2 transition-colors"
+            aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
           >
-            Launch App
+            {dark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <Link href="/dashboard" className="btn btn-primary hidden sm:inline-flex px-4 py-2 text-[13px]">
+            Open console
           </Link>
-        </div>
-
-        {/* Mobile Toggle */}
-        <div className="flex items-center gap-4 lg:hidden">
           <button
-            onClick={toggleTheme}
-            className="p-2 text-foreground"
+            className="lg:hidden w-9 h-9 grid place-items-center rounded-full text-foreground"
+            onClick={() => setOpen((v) => !v)}
+            aria-label={open ? "Close menu" : "Open menu"}
           >
-            {isDark ? <Sun size={20} /> : <Moon size={20} />}
-          </button>
-          <button
-            className="p-2 text-foreground"
-            onClick={() => setIsOpen(!isOpen)}
-          >
-            {isOpen ? <X /> : <Menu />}
+            {open ? <X size={18} /> : <Menu size={18} />}
           </button>
         </div>
-      </div>
+      </nav>
 
-      {/* Mobile Menu */}
       <AnimatePresence>
-        {isOpen && (
+        {open && (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="absolute top-full left-0 right-0 bg-background border-b border-glass-border p-6 lg:hidden shadow-xl"
+            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.2 }}
+            className="mx-auto max-w-6xl mt-2 glass rounded-3xl p-4 sm:p-6"
           >
-            <div className="flex flex-col gap-4">
-              {navLinks.map((link) => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1">
+              {[...primary.slice(0, 0), ...primary, ...more].map((l, i) => (
                 <Link
-                  key={link.name}
-                  href={link.href}
-                  className="text-lg font-medium text-text-muted hover:text-primary transition-colors"
-                  onClick={() => setIsOpen(false)}
+                  key={l.href}
+                  href={l.href}
+                  className={`px-3 py-2.5 rounded-xl text-sm hover:bg-card-2 transition-colors ${i < primary.length ? "lg:hidden text-foreground font-medium" : "text-text-muted hover:text-foreground"}`}
                 >
-                  {link.name}
+                  {l.name}
                 </Link>
               ))}
-              <Link
-                href="/dashboard"
-                className="mt-4 px-5 py-3 bg-primary text-white rounded-xl text-center font-bold"
-                onClick={() => setIsOpen(false)}
-              >
-                Launch App
-              </Link>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </nav>
+    </header>
   );
 }

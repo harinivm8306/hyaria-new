@@ -1,80 +1,288 @@
 @import "tailwindcss";
 
-@theme {
-  --color-primary: #10b981;
-  --color-primary-dark: #059669;
-  --color-secondary: #3b82f6;
-  --color-accent: #f59e0b;
-  --color-bg-dark: #020617;
-  --color-bg-card: #0f172a;
-  --color-text-main: #f8fafc;
-  --color-text-muted: #94a3b8;
-}
+/*
+  HY-ARIA design system — "dark bio-lab".
+  Concept: a grow chamber at night. Ink-dark surfaces, chlorophyll green for plant/health,
+  grow-light violet for energy and AI, mist cyan for water, amber/red for warnings.
+  Every colour is a token; .light swaps the token values, components never use literals.
+*/
 
 :root {
-  /* Dark Mode Default */
-  --background: #020617;
-  --foreground: #f8fafc;
-  --card-bg: #0f172a;
-  --primary: #10b981;
-  --primary-glow: rgba(16, 185, 129, 0.15);
-  --glass-bg: rgba(15, 23, 42, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --text-muted: #94a3b8;
-  --grid-color: rgba(255, 255, 255, 0.05);
+  /* surfaces */
+  --c-bg: #06090b;
+  --c-bg-2: #0a1013;
+  --c-card: #0d1417;
+  --c-card-2: #121b1f;
+  --c-line: rgba(170, 230, 205, 0.09);
+  --c-line-strong: rgba(170, 230, 205, 0.18);
+
+  /* text */
+  --c-fg: #e7efeb;
+  --c-muted: #8ea39b;
+  --c-faint: #5c6f68;
+
+  /* accents */
+  --c-leaf: #5fd896;       /* chlorophyll — health, primary actions */
+  --c-leaf-deep: #2fae6c;
+  --c-violet: #a684ff;     /* grow light — energy, AI */
+  --c-mist: #7fd4f0;       /* water, mist */
+  --c-amber: #f0b35a;      /* warning */
+  --c-red: #ff6b6b;        /* critical */
+
+  --c-glow-leaf: rgba(95, 216, 150, 0.18);
+  --c-glow-violet: rgba(166, 132, 255, 0.20);
+  --c-glass: rgba(13, 20, 23, 0.62);
+
+  /* legacy names used by older pages */
+  --background: var(--c-bg);
+  --foreground: var(--c-fg);
+  --card-bg: var(--c-card);
+  --primary: var(--c-leaf);
+  --primary-glow: var(--c-glow-leaf);
+  --glass-bg: var(--c-glass);
+  --glass-border: var(--c-line);
+  --text-muted: var(--c-muted);
+  --grid-color: var(--c-line);
+
+  color-scheme: dark;
 }
 
 .light {
-  /* Light Mode Overrides */
-  --background: #f8fafc;
-  --foreground: #020617;
-  --card-bg: #ffffff;
-  --glass-bg: rgba(255, 255, 255, 0.8);
-  --glass-border: rgba(0, 0, 0, 0.1);
-  --text-muted: #475569;
-  --grid-color: rgba(0, 0, 0, 0.05);
+  --c-bg: #f3f6f4;
+  --c-bg-2: #eaf0ec;
+  --c-card: #ffffff;
+  --c-card-2: #f6f9f7;
+  --c-line: rgba(20, 60, 45, 0.10);
+  --c-line-strong: rgba(20, 60, 45, 0.20);
+  --c-fg: #0b1713;
+  --c-muted: #4d6159;
+  --c-faint: #81948c;
+  --c-leaf: #1f9d5f;
+  --c-leaf-deep: #167a49;
+  --c-violet: #6d48d8;
+  --c-mist: #1f8fb8;
+  --c-amber: #b77612;
+  --c-red: #c93636;
+  --c-glow-leaf: rgba(31, 157, 95, 0.14);
+  --c-glow-violet: rgba(109, 72, 216, 0.14);
+  --c-glass: rgba(255, 255, 255, 0.72);
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-primary: var(--c-leaf);
+  --color-primary-dark: var(--c-leaf-deep);
+  --color-secondary: var(--c-violet);
+  --color-accent: var(--c-amber);
+  --color-mist: var(--c-mist);
+  --color-danger: var(--c-red);
+  --color-bg-dark: var(--c-bg);
+  --color-bg-card: var(--c-card);
+  --color-card-2: var(--c-card-2);
+  --color-text-main: var(--c-fg);
+  --color-text-muted: var(--c-muted);
+  --color-faint: var(--c-faint);
+  --color-background: var(--c-bg);
+  --color-foreground: var(--c-fg);
+  --color-glass-border: var(--c-line);
+  --color-line: var(--c-line);
+  --color-line-strong: var(--c-line-strong);
+
+  --font-display: "Bricolage Grotesque Variable", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Geist Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+html,
+body {
+  background-color: var(--c-bg);
+  color: var(--c-fg);
 }
 
 body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   overflow-x: hidden;
-  transition: background-color 0.5s ease, color 0.5s ease;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.4s ease, color 0.4s ease;
 }
 
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+  text-wrap: balance;
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: var(--c-glow-violet);
+}
+
+:focus-visible {
+  outline: 2px solid var(--c-leaf);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ---------- reusable surfaces ---------- */
+
 .glass {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+  background: var(--c-glass);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid var(--c-line);
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--c-card-2), var(--c-card));
+  border: 1px solid var(--c-line);
+  border-radius: 20px;
+}
+
+.panel-hi {
+  position: relative;
+}
+.panel-hi::before {
+  /* hairline light catching the top edge */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, var(--c-line-strong), transparent 40%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 .text-gradient {
-  background: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
+  background: linear-gradient(120deg, var(--c-leaf) 0%, var(--c-mist) 50%, var(--c-violet) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .glow-shadow {
-  box-shadow: 0 0 20px var(--primary-glow);
+  box-shadow: 0 0 40px var(--c-glow-leaf);
 }
+
+.grid-bg {
+  background-image:
+    linear-gradient(var(--c-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--c-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--c-line-strong);
+  color: var(--c-muted);
+}
+.chip-real { color: var(--c-leaf); border-color: color-mix(in srgb, var(--c-leaf) 45%, transparent); background: color-mix(in srgb, var(--c-leaf) 10%, transparent); }
+.chip-sim { color: var(--c-mist); border-color: color-mix(in srgb, var(--c-mist) 45%, transparent); background: color-mix(in srgb, var(--c-mist) 10%, transparent); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+  background: var(--c-leaf);
+  color: #04120b;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-leaf) 60%, transparent), 0 10px 40px -10px var(--c-leaf);
+}
+.btn-primary:hover { box-shadow: 0 0 0 1px var(--c-leaf), 0 14px 50px -8px var(--c-leaf); }
+.btn-ghost {
+  border: 1px solid var(--c-line-strong);
+  color: var(--c-fg);
+  background: color-mix(in srgb, var(--c-card) 60%, transparent);
+}
+.btn-ghost:hover { border-color: var(--c-leaf); }
+
+/* ---------- motion ---------- */
 
 @keyframes float {
-  0% {
-    transform: translateY(0px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.animate-float { animation: float 4s ease-in-out infinite; }
 
-  50% {
-    transform: translateY(-10px);
-  }
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
 
-  100% {
-    transform: translateY(0px);
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
-.animate-float {
-  animation: float 3s ease-in-out infinite;
+/* ---------- 3D hotspots (HTML labels anchored in the chamber) ---------- */
+.hotspot {
+  --tone: var(--c-leaf);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 4px 9px 4px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #06090b 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  color: #e7efeb;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.hotspot:hover { transform: translateY(-2px); border-color: var(--tone); }
+.hotspot-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--tone); box-shadow: 0 0 10px var(--tone); }
+.hotspot-label { color: #9fb3ab; text-transform: uppercase; }
+.hotspot-value { color: #ffffff; font-weight: 600; }
+.hotspot-mist { --tone: var(--c-mist); }
+.hotspot-violet { --tone: var(--c-violet); }
+.hotspot-amber { --tone: var(--c-amber); }
+.hotspot-red { --tone: var(--c-red); }
+@media (max-width: 640px) {
+  .hotspot { padding: 3px 7px 3px 5px; font-size: 9px; }
+  .hotspot-label { display: none; }
 }
