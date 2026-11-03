@@ -3,7 +3,8 @@
 /*
   HY-ARIA digital twin of the 3-tier aeroponic chamber (report Fig 6.3).
   Top tier: LED grow light + lettuce canopy. Middle tier: hanging roots + mist nozzles.
-  Bottom tier: nutrient reservoir + pump. Everything visual is driven by `state`.
+  Bottom tier: nutrient reservoir + pump; N/P/K stock bottles and dosing pumps outside the left wall.
+  Everything visual is driven by `state`.
 */
 
 import { Html, OrbitControls, RoundedBox, Lightformer, Environment } from "@react-three/drei";
@@ -21,7 +22,10 @@ export type ChamberState = {
   waterLevel: number;     // 0..100 %
   health: "Good" | "Watch" | "Act" | "Unknown";
   pumpFault?: boolean;
+  lastDose?: { ion: Ion; running: boolean } | null; // most recent N/P/K peristaltic pump run
 };
+
+export type Ion = "n" | "p" | "k";
 
 export type FocusKey = "overview" | "canopy" | "roots" | "reservoir" | "plants";
 
@@ -40,6 +44,8 @@ const C = {
   water: { deep: new THREE.Color("#04262a"), shallow: new THREE.Color("#0e5c5a"), glow: new THREE.Color("#7fd4f0") },
   led: new THREE.Color("#c27bff"),
   mist: new THREE.Color("#cfefff"),
+  // same hues as the camera's N/P/K labels (NPK_TONE)
+  ion: { n: new THREE.Color("#f0b35a"), p: new THREE.Color("#a684ff"), k: new THREE.Color("#ff6b6b") } as Record<Ion, THREE.Color>,
 };
 
 // chamber dimensions (metres-ish)
@@ -52,7 +58,7 @@ export const CAMERA_PRESETS: Record<FocusKey, { pos: [number, number, number]; t
   canopy: { pos: [2.1, 3.5, 2.6], target: [0, 2.2, 0] },
   plants: { pos: [2.4, 3.05, 2.7], target: [0, 2.15, 0] },
   roots: { pos: [2.3, 1.45, 2.7], target: [0, 1.35, 0] },
-  reservoir: { pos: [2.6, 0.9, 2.9], target: [0, 0.35, 0] },
+  reservoir: { pos: [-2.1, 1.2, 3.3], target: [-0.7, 0.4, 0] },  // includes the N/P/K bottles
 };
 
 // ---------------------------------------------------------------- utilities
@@ -416,6 +422,84 @@ function GrowLight({ ledRef }: { ledRef: MutableRefObject<number> }) {
   );
 }
 
+// N, P, K stock bottles outside the left wall, one peristaltic pump each, tube into the reservoir.
+// Liquid height is fixed: there is no bottle level sensor.
+const IONS: Ion[] = ["n", "p", "k"];
+const BOTTLE_X = -W / 2 - 0.26;
+const ION_Z: Record<Ion, number> = { n: -0.34, p: 0, k: 0.34 };
+
+function DosingPump({ ion, runRef, last }: { ion: Ion; runRef: MutableRefObject<Record<Ion, number>>; last: boolean }) {
+  const z = ION_Z[ion];
+  const col = C.ion[ion];
+  const rotor = useRef<THREE.Group>(null);
+  const lamp = useRef<THREE.MeshStandardMaterial>(null);
+  const tubeMat = useRef<THREE.MeshStandardMaterial>(null);
+  const tube = useMemo(() => {
+    const pts = [
+      [BOTTLE_X, 0.38, z], [BOTTLE_X, 0.5, z], [-W / 2 - 0.13, 0.55, z], [-W / 2 - 0.05, 0.62, z],
+      [-W / 2 + 0.02, 0.86, z * 0.8], [-W / 2 + 0.2, 0.86, z * 0.65], [-W / 2 + 0.28, 0.74, z * 0.65],
+    ].map(([x, y, zz]) => new THREE.Vector3(x, y, zz));
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.009, 6, false);
+  }, [z]);
+
+  useFrame(({ clock }, dt) => {
+    const run = runRef.current[ion];
+    const t = clock.elapsedTime;
+    if (rotor.current) rotor.current.rotation.x += dt * run * 9;
+    if (lamp.current) lamp.current.emissiveIntensity = run > 0.05 ? 1 + run * (1.4 + Math.sin(t * 10) * 0.9) : last ? 0.7 : 0.08;
+    if (tubeMat.current) tubeMat.current.emissiveIntensity = 0.06 + run * (0.9 + Math.sin(t * 14 - z * 6) * 0.5);
+  });
+
+  return (
+    <group>
+      {/* bottle */}
+      <mesh position={[BOTTLE_X, 0.17, z]}>
+        <cylinderGeometry args={[0.085, 0.085, 0.34, 28]} />
+        <meshPhysicalMaterial color="#cfe8e2" transparent opacity={0.16} roughness={0.08} depthWrite={false} />
+      </mesh>
+      <mesh position={[BOTTLE_X, 0.115, z]}>
+        <cylinderGeometry args={[0.076, 0.076, 0.21, 28]} />
+        <meshStandardMaterial color={col} emissive={col} emissiveIntensity={0.25} roughness={0.3} transparent opacity={0.85} />
+      </mesh>
+      <mesh position={[BOTTLE_X, 0.36, z]}>
+        <cylinderGeometry args={[0.04, 0.045, 0.04, 16]} />
+        <meshStandardMaterial color="#141b1d" roughness={0.5} />
+      </mesh>
+      {/* pump on a bracket against the frame */}
+      <group position={[-W / 2 - 0.1, 0.56, z]}>
+        <RoundedBox args={[0.1, 0.13, 0.13]} radius={0.02}>
+          <meshStandardMaterial color="#141b1d" roughness={0.5} metalness={0.3} />
+        </RoundedBox>
+        <group ref={rotor} position={[-0.06, 0, 0]}>
+          <mesh rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.048, 0.048, 0.02, 24]} />
+            <meshStandardMaterial color="#2d3a3e" roughness={0.4} metalness={0.4} />
+          </mesh>
+          <mesh position={[-0.012, 0, 0]}>
+            <boxGeometry args={[0.006, 0.08, 0.014]} />
+            <meshStandardMaterial color={col} emissive={col} emissiveIntensity={0.6} />
+          </mesh>
+        </group>
+        <mesh position={[0, 0.07, 0]}>
+          <sphereGeometry args={[0.014, 12, 12]} />
+          <meshStandardMaterial ref={lamp} color="#0a0f10" emissive={col} toneMapped={false} />
+        </mesh>
+      </group>
+      <mesh geometry={tube}>
+        <meshStandardMaterial ref={tubeMat} color="#d9dfdc" emissive={col} roughness={0.35} transparent opacity={0.8} />
+      </mesh>
+    </group>
+  );
+}
+
+function NutrientStation({ runRef, last }: { runRef: MutableRefObject<Record<Ion, number>>; last?: Ion }) {
+  return (
+    <group>
+      {IONS.map((ion) => <DosingPump key={ion} ion={ion} runRef={runRef} last={last === ion} />)}
+    </group>
+  );
+}
+
 function Sensor() {
   return (
     <group position={[-W / 2 + 0.02, T2 + 0.45, D / 2 - 0.15]}>
@@ -493,6 +577,7 @@ function Scene({ state, focus, story, interactive, hotspots, onHotspot, reduceMo
   const onRef = useRef(0);
   const ledRef = useRef(state.ledPwm / 100);
   const levelRef = useRef(state.waterLevel);
+  const doseRef = useRef<Record<Ion, number>>({ n: 0, p: 0, k: 0 });
   const root = useRef<THREE.Group>(null);
 
   useFrame((_, dt) => {
@@ -507,6 +592,10 @@ function Scene({ state, focus, story, interactive, hotspots, onHotspot, reduceMo
     const ledTarget = story ? (sp > 0.55 ? 1 : 0.5) : state.ledPwm / 100;
     ledRef.current = THREE.MathUtils.lerp(ledRef.current, ledTarget, k);
     levelRef.current = THREE.MathUtils.lerp(levelRef.current, state.waterLevel, k);
+    // landing nutrient chapter runs N, then P, then K
+    const storyIon = story && sp > 0.4 && sp < 0.58 ? IONS[Math.min(2, Math.floor(((sp - 0.4) / 0.18) * 3))] : null;
+    const runIon = story ? storyIon : state.lastDose?.running ? state.lastDose.ion : null;
+    for (const ion of IONS) doseRef.current[ion] = THREE.MathUtils.lerp(doseRef.current[ion], runIon === ion ? 1 : 0, k * 2);
     if (root.current && !interactive && !story && !reduceMotion) root.current.rotation.y += dt * 0.08;
   });
 
@@ -530,6 +619,7 @@ function Scene({ state, focus, story, interactive, hotspots, onHotspot, reduceMo
         <Mist onRef={onRef} />
         <GrowLight ledRef={ledRef} />
         <Sensor />
+        <NutrientStation runRef={doseRef} last={story ? undefined : state.lastDose?.ion} />
         {POTS.map(([x, z], i) => (
           <group key={i}>
             <Plant x={x} z={z} seed={i * 17 + 3} growthRef={growthRef} stressRef={stressRef} />

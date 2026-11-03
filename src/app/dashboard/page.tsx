@@ -10,7 +10,7 @@ import {
   Thermometer, Timer, Waves, Zap,
 } from "lucide-react";
 import ChamberView from "@/components/three/ChamberView";
-import type { FocusKey, Hotspot } from "@/components/three/AeroChamber";
+import type { FocusKey, Hotspot, Ion } from "@/components/three/AeroChamber";
 import { API_BASE, DEVICE_ID, apiGet, apiPost } from "@/lib/api";
 import { demoActions, demoHistory, demoLive } from "@/components/dashboard/demo";
 import NutrientCard from "@/components/dashboard/NutrientCard";
@@ -123,8 +123,16 @@ export default function Dashboard() {
   const nextMist = ctrl.misting?.next_mist_at ? Math.max(0, Math.round(ctrl.misting.next_mist_at - live.time)) : null;
   const mistOn = (v("pump_state") ?? 0) > 0.5 || (nextMist != null && nextMist > 0 && ctrl.misting?.last_mist_at && live.time - ctrl.misting.last_mist_at < 6);
 
+  // newest N/P/K pump run; treat it as running for 30 s (a 5–10 ml peristaltic dose)
+  const lastNpk = actions
+    .filter((a) => /^dose_[npk]$/.test(a.actuator) && a.status === "done")
+    .reduce<any>((best, a) => (!best || a.ts > best.ts ? a : best), null);
+  const lastIon = lastNpk ? (lastNpk.actuator.slice(5) as Ion) : null;
+  const npkAgo = lastNpk ? Math.max(0, live.time - lastNpk.ts) : 0;
+
   const chamberState = {
     mistOn: !!mistOn,
+    lastDose: lastIon ? { ion: lastIon, running: npkAgo < 30 } : null,
     ledPwm: ctrl.lighting?.pwm ?? 0,
     growth: Math.min(1, (live.day ?? 0) / 40),
     waterLevel: v("water_level") ?? 70,
@@ -138,10 +146,11 @@ export default function Dashboard() {
     { id: "env", label: "DHT11", value: v("air_temp") != null ? `${v("air_temp")!.toFixed(1)}° · ${Math.round(v("humidity") ?? 0)}%` : "–", position: [-0.98, 2.62, 0.45], tone: "amber" },
     { id: "roots", label: "Mist", value: pumpFault ? "fault" : nextMist != null ? `in ${Math.floor(nextMist / 60)}:${String(nextMist % 60).padStart(2, "0")}` : "–", position: [0.35, 1.25, 0.2], tone: pumpFault ? "red" : "mist" },
     { id: "camera", label: "Camera", value: photo?.npk_label ? (NPK_TEXT[photo.npk_label] ?? photo.npk_label).replace(" deficient", " low") : "no photo", position: [0.05, 3.1, 0.35], tone: photo?.npk_label && photo.npk_label !== "healthy" ? "amber" : "leaf" },
+    { id: "npk", label: "N·P·K pumps", value: lastNpk ? (npkAgo < 30 ? `${lastIon!.toUpperCase()} dosing ${lastNpk.amount} ml` : `last ${lastIon!.toUpperCase()} ${lastNpk.amount} ml · ${npkAgo < 3600 ? `${Math.round(npkAgo / 60)}m` : `${Math.round(npkAgo / 3600)}h`} ago`) : "idle", position: [-1.05, 0.02, 0.75], tone: npkAgo < 30 && lastNpk ? "amber" : "violet" },
     { id: "reservoir", label: "pH · EC", value: v("ph") != null ? `${v("ph")!.toFixed(2)} · ${v("ec")?.toFixed(2)}` : "–", position: [-0.45, 0.62, 0.3], tone: "leaf" },
   ];
   const onHotspot = (id: string) => {
-    const map: Record<string, FocusKey> = { camera: "canopy", canopy: "canopy", plants: "canopy", env: "canopy", roots: "roots", reservoir: "reservoir" };
+    const map: Record<string, FocusKey> = { camera: "canopy", canopy: "canopy", plants: "canopy", env: "canopy", roots: "roots", reservoir: "reservoir", npk: "reservoir" };
     setFocus(map[id] ?? "overview");
   };
 

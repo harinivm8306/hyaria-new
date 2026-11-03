@@ -84,7 +84,8 @@ If no backend answers, `/dashboard` shows clearly labelled **demo data** (amber 
 
 1. **Done 3 Nov 2026:** plant camera (`/plants` page + dashboard panel, `src/components/plants/PlantCamera.tsx`), image storage + API (`images` table, `hyaria/vision.py`), A16 N/P/K fusion dosing (`control/npk.py`, sensors `n_ppm/p_ppm/k_ppm`, actuators `dose_n/p/k`, safety limits), first AI model (YOLO11n-cls N/P/K classifier, ONNX in `backend/models/`, 93% on 42 held-out photos, experimental; script `backend/training/train_npk.py`). 30 tests.
    Original request was: (a) add a **plant camera** to the UI to track plants over time; (b) **N, P, K stored separately** (peristaltic pumps N/P/K via relay, slide block diagram), **ion-selective electrode (ISE) sensors** measure NO₃⁻ / H₂PO₄⁻ / K⁺, combined with **camera-detected deficiency**, to decide which nutrient to dose into the solution; (c) **start implementing an AI model** — plan: fine-tune YOLO11n-cls on the CC0 lettuce NPK image dataset (github.com/ramimalik782/Lettuce-NPK-dataset) and export ONNX. Designs in `docs/ROADMAP.md` §1 and `docs/AI_MODELS.md`.
-2. Next: test the model on real chamber photos; 3D stock bottles/pumps in the twin; Simulation Lab page (3D), plant growth page, restyle inner pages, two-board firmware, login/PWA, DQN in simulator, grounded chatbot, resource accounting, recommendations.
+2. Done 3 Nov 2026: N/P/K stock bottles + dosing pumps in the 3D twin (`ChamberState.lastDose`).
+3. Next: test the model on real chamber photos; Simulation Lab page (3D), plant growth page, restyle inner pages, two-board firmware, login/PWA, DQN in simulator, grounded chatbot, resource accounting, recommendations.
 
 ## graphify
 

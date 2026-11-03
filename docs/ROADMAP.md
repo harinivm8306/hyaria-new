@@ -39,7 +39,7 @@ Harini's request (verbatim intent): the UI should have a **camera to keep track 
 ## 2. Next
 
 - **Test the N/P/K model on real chamber photos** (10–20, healthy and unhealthy); retrain with them if needed.
-- **3D twin:** N/P/K stock bottles + peristaltic pumps beside the reservoir; flash the pump that ran.
+- ~~**3D twin:** N/P/K stock bottles + peristaltic pumps beside the reservoir; flash the pump that ran.~~ Done 3 Nov 2026: bottles outside the left wall (`NutrientStation` in `AeroChamber.tsx`); the newest `dose_n/p/k` action lights its pump (spinning rotor + glowing tube for 30 s, steady lamp after). Bottle liquid is fixed height: no level sensor.
 
 - **Simulation Lab page** (3D): scenarios (normal, heatwave, dry air, pH drift, low N/P/K, low tank, dark day), sensor overrides, actuator buttons, fault injection, time speed 1×/60×/600×, event log; add simulated CO₂, airflow, fan, heater.
 - **Plant growth page**: 3D plant + growth timeline from camera photos; harvest-due alert from growing degree days (A10).
