@@ -1,200 +1,213 @@
 "use client";
 
-import { useState } from "react";
-import Section from "@/components/Section";
-import { API_BASE } from "@/lib/api";
-import { Upload, Activity, AlertTriangle, ShieldCheck, Thermometer, Brain, ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { AlertTriangle, ArrowRight, CloudOff, Microscope, ShieldCheck, Upload, X } from "lucide-react";
+import { API_BASE } from "@/lib/api";
+
+type Leaf = { class: string; confidence: number; severity: number };
+type Result = {
+  plant_detected: string;
+  disease: string;
+  status: "Optimal" | "Warning" | "Critical" | string;
+  confidence: number;
+  treatment_plan: string;
+  precision_data?: {
+    total_leaves: number;
+    infected_count: number;
+    avg_severity_pct: number;
+    spray_tier: string;
+    dosage_percent: number;
+    individual_leaves: Leaf[];
+  };
+};
+
+const STATUS_TONE: Record<string, string> = { Optimal: "var(--c-leaf)", Warning: "var(--c-amber)", Critical: "var(--c-red)" };
 
 export default function DetectorPage() {
-    const [file, setFile] = useState<File | null>(null);
-    const [preview, setPreview] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState<any>(null);
-    const [error, setError] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<Result | null>(null);
+  const [error, setError] = useState<{ offline: boolean; text: string } | null>(null);
+  const [drag, setDrag] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const selected = e.target.files[0];
-            setFile(selected);
-            setPreview(URL.createObjectURL(selected));
-            setResult(null);
-            setError(null);
-        }
-    };
+  const pick = (f: File | undefined) => {
+    if (!f || !f.type.startsWith("image/")) return;
+    if (preview) URL.revokeObjectURL(preview);
+    setFile(f); setPreview(URL.createObjectURL(f)); setResult(null); setError(null);
+  };
 
-    const handleUpload = async () => {
-        if (!file) return;
-        setLoading(true);
-        setError(null);
+  const clear = () => {
+    if (preview) URL.revokeObjectURL(preview);
+    setFile(null); setPreview(null); setResult(null); setError(null);
+    if (input.current) input.current.value = "";
+  };
 
-        const formData = new FormData();
-        formData.append("file", file);
+  const analyse = async () => {
+    if (!file) return;
+    setLoading(true); setError(null);
+    const body = new FormData();
+    body.append("file", file);
+    try {
+      const res = await fetch(`${API_BASE}/detect-disease`, { method: "POST", body });
+      if (!res.ok) {
+        const detail = await res.json().then((j) => j.detail).catch(() => null);
+        setError({ offline: false, text: detail ?? `Backend answered ${res.status}.` });
+        return;
+      }
+      setResult(await res.json());
+    } catch {
+      setError({ offline: true, text: `No HY-ARIA backend answered at ${API_BASE}.` });
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        try {
-            const res = await fetch(`${API_BASE}/detect-disease`, {
-                method: "POST",
-                body: formData,
-            });
+  const tone = result ? STATUS_TONE[result.status] ?? "var(--c-faint)" : "var(--c-faint)";
+  const p = result?.precision_data;
 
-            if (!res.ok) {
-                throw new Error("Failed to analyze image. Ensure the backend is running.");
-            }
+  return (
+    <main className="pt-24 pb-16">
+      <div className="mx-auto max-w-[1400px] px-4 sm:px-6">
+        <div className="mb-6">
+          <p className="eyebrow flex items-center gap-2 mb-3"><Microscope size={13} /> Disease Lab · legacy model</p>
+          <h1 className="font-display text-4xl sm:text-5xl font-bold">Disease Lab</h1>
+          <p className="mt-2 text-text-muted max-w-2xl">
+            Upload a leaf photo. A leaf detector finds each leaf, a classifier names the disease, and the share of spotted
+            area gives a severity. The advice below is a rule of thumb from that severity; nothing here controls the chamber.
+          </p>
+        </div>
 
-            const data = await res.json();
-            setResult(data);
-        } catch (err: any) {
-            setError(err.message || "An error occurred");
-        } finally {
-            setLoading(false);
-        }
-    };
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm" style={{ borderColor: "color-mix(in srgb, var(--c-amber) 40%, transparent)", background: "color-mix(in srgb, var(--c-amber) 7%, transparent)" }}>
+          <AlertTriangle size={18} className="text-accent shrink-0 mt-0.5" />
+          <p className="text-text-muted">
+            <span className="text-foreground font-medium">This model has no lettuce classes.</span> It was trained on the
+            PlantVillage dataset (other crops), so results for lettuce leaves are not reliable. A lettuce disease model is
+            planned. For lettuce N/P/K deficiency, use the <Link href="/plants" className="text-primary underline underline-offset-2">plant camera</Link>.
+          </p>
+        </div>
 
-    return (
-        <main className="pt-24 pb-12 min-h-screen transition-all duration-700 bg-background text-foreground">
-            <Section>
-                <div className="max-w-4xl mx-auto space-y-12">
-                    <div className="text-center space-y-4">
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold uppercase tracking-wider mb-2">
-                            <Brain className="w-4 h-4" />
-                            Computer Vision
-                        </div>
-                        <h1 className="text-5xl md:text-6xl font-black tracking-tight uppercase italic">
-                            Disease <span className="text-primary not-italic">Detector</span>
-                        </h1>
-                        <p className="text-text-muted text-lg max-w-2xl mx-auto">
-                            Upload a photo of a plant leaf to instantly identify potential diseases, nutritional deficiencies, and receive automated treatment plans powered by our AI model.
-                        </p>
+        <div className="grid lg:grid-cols-12 gap-4">
+          {/* ------------------------------------------------ upload */}
+          <section className="lg:col-span-7 panel panel-hi p-5">
+            <p className="eyebrow mb-3">Leaf photo</p>
+            {preview ? (
+              <div className="space-y-4">
+                <div className="relative rounded-xl overflow-hidden border border-line bg-card-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={preview} alt="Selected leaf" className="w-full max-h-[460px] object-contain" />
+                  {loading && (
+                    <div className="absolute inset-0 grid place-items-center bg-background/60 backdrop-blur-sm">
+                      <div className="w-10 h-10 rounded-full border-2 border-line border-t-primary animate-spin" />
                     </div>
-
-                    <div className="grid md:grid-cols-2 gap-8">
-                        {/* Upload Section */}
-                        <div className="glass p-8 rounded-[3rem] border border-white/5 flex flex-col items-center justify-center min-h-[400px]">
-                            {preview ? (
-                                <div className="space-y-6 w-full flex flex-col items-center">
-                                    <div className="relative w-full max-w-xs aspect-square rounded-2xl overflow-hidden border-2 border-primary/30 shadow-2xl">
-                                        <img src={preview} alt="Preview" className="w-full h-full object-cover" />
-                                    </div>
-                                    <div className="flex gap-4 w-full">
-                                        <button
-                                            onClick={() => { setFile(null); setPreview(null); setResult(null); }}
-                                            className="flex-1 py-3 px-4 rounded-xl border border-white/10 hover:bg-white/5 font-bold transition-colors"
-                                        >
-                                            Reset
-                                        </button>
-                                        <button
-                                            onClick={handleUpload}
-                                            disabled={loading}
-                                            className="flex-1 py-3 px-4 bg-primary hover:bg-primary-dark text-white rounded-xl font-bold transition-all flex justify-center items-center gap-2 shadow-lg shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {loading ? "Analyzing..." : "Analyze Image"}
-                                            {!loading && <ArrowRight className="w-4 h-4" />}
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : (
-                                <label className="flex flex-col items-center justify-center w-full h-full cursor-pointer group">
-                                    <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform group-hover:bg-primary/20">
-                                        <Upload className="w-8 h-8 text-primary" />
-                                    </div>
-                                    <h3 className="text-xl font-bold mb-2">Upload Leaf Image</h3>
-                                    <p className="text-sm text-text-muted text-center max-w-xs">
-                                        Drag and drop or click to select a clear photo of the affected plant leaf.
-                                    </p>
-                                    <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
-                                </label>
-                            )}
-
-                            {error && (
-                                <div className="mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-sm font-medium w-full text-center">
-                                    {error}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Results Section */}
-                        <div className="glass p-8 rounded-[3rem] border border-white/5 flex flex-col">
-                            <h3 className="text-2xl font-black uppercase tracking-widest mb-8 opacity-50 flex items-center gap-3">
-                                <Activity /> Analysis Report
-                            </h3>
-
-                            {loading ? (
-                                <div className="flex-1 flex flex-col items-center justify-center space-y-4 opacity-50">
-                                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                                    <p className="font-bold tracking-widest uppercase text-sm">Processing via CNN...</p>
-                                </div>
-                            ) : result ? (
-                                <motion.div
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="space-y-6 flex-1 flex flex-col"
-                                >
-                                    <div className={`p-6 rounded-2xl border flex items-center gap-4 ${result.status === 'Optimal' || result.status === 'Healthy' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
-                                        <div className="p-3 bg-white/10 rounded-xl">
-                                            {result.status === 'Optimal' || result.status === 'Healthy' ? <ShieldCheck size={32} /> : <AlertTriangle size={32} />}
-                                        </div>
-                                        <div>
-                                            <h4 className="text-xs font-black uppercase tracking-widest mb-1 opacity-70">Status</h4>
-                                            <div className="text-2xl font-black">{result.status}</div>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="p-4 bg-foreground/5 rounded-2xl border border-foreground/5">
-                                            <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest block mb-1">Plant Type</span>
-                                            <span className="font-bold text-lg">{result.plant_detected}</span>
-                                        </div>
-                                        <div className="p-4 bg-foreground/5 rounded-2xl border border-foreground/5">
-                                            <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest block mb-1">Confidence</span>
-                                            <span className="font-bold text-lg">{(result.confidence * 100).toFixed(1)}%</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="p-4 bg-primary/10 rounded-2xl border border-primary/20">
-                                        <span className="text-[10px] font-bold text-primary uppercase tracking-widest block mb-1 font-black">Detected Disease</span>
-                                        <span className="font-bold text-lg text-foreground">{result.disease}</span>
-                                    </div>
-
-                                    <div className="flex-1 p-6 bg-primary/5 border border-primary/20 rounded-2xl mt-4">
-                                        <h4 className="text-xs font-black uppercase tracking-widest mb-3 text-primary flex items-center gap-2">
-                                            <Thermometer size={14} /> Treatment Plan
-                                        </h4>
-                                        <p className="text-sm font-medium leading-relaxed text-foreground">
-                                            {result.treatment_plan}
-                                        </p>
-                                    </div>
-
-                                    {result.precision_data && (
-                                        <motion.div
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
-                                            className="grid grid-cols-3 gap-3"
-                                        >
-                                            <div className="p-3 bg-foreground/5 rounded-xl border border-foreground/5 text-center">
-                                                <span className="text-[9px] font-bold text-text-muted uppercase block">Leaves</span>
-                                                <span className="font-bold text-sm text-primary">{result.precision_data.infected_count}/{result.precision_data.total_leaves}</span>
-                                            </div>
-                                            <div className="p-3 bg-foreground/5 rounded-xl border border-foreground/5 text-center">
-                                                <span className="text-[9px] font-bold text-text-muted uppercase block">Severity</span>
-                                                <span className="font-bold text-sm text-primary">{result.precision_data.avg_severity_pct}%</span>
-                                            </div>
-                                            <div className="p-3 bg-foreground/5 rounded-xl border border-foreground/5 text-center">
-                                                <span className="text-[9px] font-bold text-text-muted uppercase block">Spray Dose</span>
-                                                <span className="font-bold text-sm text-primary">{result.precision_data.dosage_percent}%</span>
-                                            </div>
-                                        </motion.div>
-                                    )}
-                                </motion.div>
-                            ) : (
-                                <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-center">
-                                    <Brain size={48} className="mb-4" />
-                                    <p className="font-bold">Awaiting image upload...</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                  )}
                 </div>
-            </Section>
-        </main>
-    );
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={analyse} disabled={loading} className="btn btn-primary disabled:opacity-50">
+                    {loading ? "Analysing…" : "Analyse photo"} {!loading && <ArrowRight size={15} />}
+                  </button>
+                  <button onClick={clear} disabled={loading} className="btn btn-ghost"><X size={15} /> Clear</button>
+                  <span className="text-xs text-faint num truncate">{file?.name} · {file ? Math.round(file.size / 1024) : 0} KB</span>
+                </div>
+              </div>
+            ) : (
+              <label
+                onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+                onDragLeave={() => setDrag(false)}
+                onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }}
+                className={`grid place-items-center text-center min-h-[340px] rounded-xl border border-dashed cursor-pointer transition-colors ${drag ? "border-primary bg-card-2" : "border-line-strong hover:bg-card-2"}`}
+              >
+                <div className="px-6">
+                  <div className="mx-auto mb-4 w-14 h-14 rounded-full grid place-items-center border border-line bg-card-2">
+                    <Upload size={22} className="text-primary" />
+                  </div>
+                  <p className="font-medium">Drop a leaf photo here, or click to choose one</p>
+                  <p className="text-sm text-text-muted mt-1">One leaf, filling most of the frame, in even light.</p>
+                </div>
+                <input ref={input} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+              </label>
+            )}
+
+            {error && (
+              <div className="mt-4 flex items-start gap-3 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "color-mix(in srgb, var(--c-red) 40%, transparent)", background: "color-mix(in srgb, var(--c-red) 7%, transparent)" }}>
+                {error.offline ? <CloudOff size={18} className="text-danger shrink-0 mt-0.5" /> : <AlertTriangle size={18} className="text-danger shrink-0 mt-0.5" />}
+                <p className="text-text-muted">
+                  <span className="text-foreground font-medium">{error.offline ? "Backend offline." : "Analysis failed."}</span> {error.text}
+                  {error.offline && <> Start it with <span className="num text-foreground">python -m uvicorn main:app</span> in the backend folder.</>}
+                </p>
+              </div>
+            )}
+          </section>
+
+          {/* ------------------------------------------------ result */}
+          <section className="lg:col-span-5 panel p-5 flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <p className="eyebrow">Result</p>
+              {result && <span className="chip">legacy · not lettuce</span>}
+            </div>
+
+            {!result ? (
+              <div className="flex-1 grid place-items-center text-center py-12">
+                <p className="text-sm text-text-muted max-w-xs">
+                  {loading ? "Detecting leaves and classifying…" : "No result yet. Choose a photo and press Analyse."}
+                </p>
+              </div>
+            ) : (
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                <div className="flex items-center gap-3 rounded-xl border px-4 py-3" style={{ borderColor: `color-mix(in srgb, ${tone} 40%, transparent)`, background: `color-mix(in srgb, ${tone} 8%, transparent)` }}>
+                  {result.status === "Optimal" ? <ShieldCheck size={22} style={{ color: tone }} /> : <AlertTriangle size={22} style={{ color: tone }} />}
+                  <div>
+                    <p className="font-display text-xl font-semibold" style={{ color: tone }}>{result.status === "Optimal" ? "No disease found" : result.disease}</p>
+                    <p className="text-xs text-text-muted">
+                      {result.status} · classifier label: {result.plant_detected} – {result.disease}
+                      {result.status === "Optimal" && " (spotted area too small to count)"}
+                    </p>
+                  </div>
+                </div>
+
+                <dl className="grid grid-cols-3 gap-2">
+                  <Stat label="Model confidence" value={`${Math.round(result.confidence * 100)}%`} />
+                  <Stat label="Leaves found" value={p ? `${p.infected_count}/${p.total_leaves} spotted` : "–"} />
+                  <Stat label="Severity" value={p ? `${p.avg_severity_pct}%` : "–"} />
+                </dl>
+                <p className="text-xs text-faint -mt-2">Confidence is the model&apos;s own score for this photo, not a measured accuracy.</p>
+
+                <div className="rounded-xl border border-line bg-card-2 px-4 py-3">
+                  <p className="eyebrow mb-1">Suggested action</p>
+                  <p className="text-sm">{result.treatment_plan}</p>
+                  {p && <p className="text-xs text-faint mt-2">Spray tier {p.spray_tier} ({p.dosage_percent}%). Advice only: there is no spray actuator.</p>}
+                </div>
+
+                {p && p.individual_leaves.length > 1 && (
+                  <div>
+                    <p className="eyebrow mb-2">Per leaf</p>
+                    <ul className="divide-y divide-line text-sm">
+                      {p.individual_leaves.map((l, i) => (
+                        <li key={i} className="flex items-center justify-between gap-3 py-1.5">
+                          <span className="truncate text-text-muted">{l.class}</span>
+                          <span className="num shrink-0">{Math.round(l.confidence * 100)}% · sev {l.severity.toFixed(1)}%</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </section>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-card-2 px-3 py-2.5">
+      <dt className="text-[11px] text-faint">{label}</dt>
+      <dd className="num text-sm mt-0.5">{value}</dd>
+    </div>
+  );
 }
