@@ -34,6 +34,9 @@ def validate_recipe(recipe: dict) -> None:
             lo, hi = stage[band]
             if lo >= hi:
                 raise ValueError(f"stage {stage['name']}: {band} low must be below high")
+        for ion, (lo, hi) in stage.get("npk", {}).items():   # optional ion targets (ppm)
+            if ion not in ("n", "p", "k") or lo >= hi:
+                raise ValueError(f"stage {stage['name']}: bad npk band '{ion}'")
 
 
 def save_recipe(recipe: dict) -> None:

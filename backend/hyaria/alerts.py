@@ -9,7 +9,8 @@ from . import db
 
 LIMIT_MARGIN = {"ph": 0.05, "ec": 0.05, "water_temp": 0.5, "air_temp": 0.5, "humidity": 2.0, "water_level": 2.0}
 LABEL = {"ph": "pH", "ec": "EC", "water_temp": "Water temp", "air_temp": "Air temp",
-         "humidity": "Humidity", "water_level": "Tank level", "light_lux": "Light"}
+         "humidity": "Humidity", "water_level": "Tank level", "light_lux": "Light",
+         "n_ppm": "Nitrate-N", "p_ppm": "Phosphate-P", "k_ppm": "Potassium"}
 UNIT = {"ph": "", "ec": " mS/cm", "water_temp": " C", "air_temp": " C", "humidity": "%", "water_level": "%"}
 COMFORT_SENSORS = ("air_temp", "humidity", "water_temp")
 COMFORT_PERSIST_S = 30 * 60
@@ -23,6 +24,7 @@ class AlertManager:
     hist: dict = field(default_factory=lambda: {"water_temp": deque(), "water_level": deque()})
     dose_issue: str | None = None                     # set by the engine from dosing feedback
     actuator_fail: dict = field(default_factory=dict)  # actuator -> message
+    extra: list = field(default_factory=list)          # [{key, severity, message}] from other loops (A16)
 
     def note_ack(self, actuator: str, ok: bool, detail: str) -> None:
         if ok:
@@ -83,6 +85,10 @@ class AlertManager:
         # 4. dose had no effect -> probe drift, empty stock bottle or blocked pump
         if self.dose_issue:
             conds["dosing:no_response"] = ("warning", self.dose_issue)
+
+        # 4b. N/P/K: camera vs ion sensor disagreements, pumps with no effect
+        for c in self.extra:
+            conds[c["key"]] = (c["severity"], c["message"])
 
         # 5. sensor health
         for s, r in latest.items():

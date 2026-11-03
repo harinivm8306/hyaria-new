@@ -7,7 +7,9 @@ Status as of 3 Nov 2026. 48 features from the Phase I report + slides: 7 built, 
 - **Phase 1 control loop** (885ef21): sensor cleaning, EC/pH dosing with learned gains, VPD misting, DLI lighting, crop recipes (lettuce/spinach/basil), alerts, health score, safety interlocks, simulator/ThingSpeak/hybrid, REST API, 20 tests.
 - **Premium UI** (6bcdfb9): design system, 3D digital twin, cinematic landing, command-centre dashboard with demo fallback.
 
-## 1. Current task — camera, ion-selective N/P/K dosing, first AI model
+## 1. Done (3 Nov 2026) — camera, ion-selective N/P/K dosing, first AI model
+
+Built as designed below, with these decisions: the A/B base mix stays (holds EC) and N/P/K pumps are added on top (fix the ion balance); ion sensors are simulated until bought; canopy is measured as % green cover (not cm², no scale marker yet); the 3D twin got a camera hotspot, but the stock bottles/pumps are not modelled in 3D yet. Model: 93% on 42 held-out photos, experimental.
 
 Harini's request (verbatim intent): the UI should have a **camera to keep track of the plants**; **N, P, K nutrients are stored separately outside**; **ion-selective sensors** tell which ion is low, combined with the **deficiency seen in the plants**; the missing nutrient is **fed and mixed into the nutrient solution** (the three nutrients are in the slide block diagram: N₂, K, P peristaltic pumps controlled by a relay module); and **start implementing an AI model**.
 
@@ -27,7 +29,7 @@ Harini's request (verbatim intent): the UI should have a **camera to keep track 
 - UI: N/P/K bars (current vs target band), which pump ran and why, combined "nutrient status" card; 3D twin shows three small stock bottles + peristaltic pumps beside the reservoir (like the slide).
 - Tests: depletion → correct ion dosed; vision-only deficiency → alert not overdose; caps respected.
 
-### 1c. First AI model — lettuce NPK deficiency classifier (in progress)
+### 1c. First AI model — lettuce NPK deficiency classifier (built)
 - Data: **github.com/ramimalik782/Lettuce-NPK-dataset** (CC0, ~337 MB, hydroponic lettuce photos: FN 12, –N 58, –P 66, –K 72). Clone with `git clone --depth 1`.
 - Model: fine-tune **Ultralytics YOLO11n-cls** (ImageNet-pretrained weights download from the Ultralytics GitHub release, which worked) at 224 px; stratified train/val split; class weights or oversampling for FN (only 12 images); heavy augmentation.
 - Export: ONNX (~5–6 MB) → `backend/models/npk_yolo11n_cls.onnx` + `npk_classes.json` + a `MODEL_CARD.md` with real val metrics (accuracy, per-class recall, confusion matrix). Report honest numbers; small dataset ⇒ label results "experimental".
@@ -35,6 +37,9 @@ Harini's request (verbatim intent): the UI should have a **camera to keep track 
 - Alternative ready-made models (if Hugging Face CDN is reachable from the machine): see `docs/AI_MODELS.md`.
 
 ## 2. Next
+
+- **Test the N/P/K model on real chamber photos** (10–20, healthy and unhealthy); retrain with them if needed.
+- **3D twin:** N/P/K stock bottles + peristaltic pumps beside the reservoir; flash the pump that ran.
 
 - **Simulation Lab page** (3D): scenarios (normal, heatwave, dry air, pH drift, low N/P/K, low tank, dark day), sensor overrides, actuator buttons, fault injection, time speed 1×/60×/600×, event log; add simulated CO₂, airflow, fan, heater.
 - **Plant growth page**: 3D plant + growth timeline from camera photos; harvest-due alert from growing degree days (A10).

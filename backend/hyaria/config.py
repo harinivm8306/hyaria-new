@@ -60,6 +60,9 @@ class Settings:
     water_level_unit: str = os.getenv("THINGSPEAK_WATER_LEVEL_UNIT", "percent")
     tank_depth_cm: float = float(os.getenv("HYARIA_TANK_DEPTH_CM", "30"))
 
+    # Plant photos from the camera panel are saved here (one folder per day)
+    images_dir: str = os.getenv("HYARIA_IMAGES_DIR", str(BACKEND_DIR / "data" / "images"))
+
     cors_origins: list = field(default_factory=lambda: os.getenv("HYARIA_CORS_ORIGINS", "*").split(","))
 
 

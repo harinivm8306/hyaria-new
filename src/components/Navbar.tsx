@@ -10,6 +10,7 @@ import Logo from "@/components/Logo";
 const primary = [
   { name: "Overview", href: "/" },
   { name: "Command Centre", href: "/dashboard" },
+  { name: "Plants", href: "/plants" },
   { name: "Disease Lab", href: "/detector" },
   { name: "Architecture", href: "/architecture" },
   { name: "AI", href: "/ai" },

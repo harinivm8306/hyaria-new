@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 VALID_RANGE = {
     "ph": (0.0, 14.0), "ec": (0.0, 10.0), "water_temp": (0.0, 50.0), "air_temp": (-10.0, 60.0),
     "humidity": (0.0, 100.0), "light_lux": (0.0, 200000.0), "water_level": (0.0, 100.0), "pump_state": (0.0, 1.0),
+    "n_ppm": (0.0, 1000.0), "p_ppm": (0.0, 500.0), "k_ppm": (0.0, 1000.0),
 }
 # Below this std over STUCK_WINDOW_S the probe is considered frozen
 NOISE_FLOOR = {"ph": 0.005, "ec": 0.003, "water_temp": 0.02, "air_temp": 0.02, "humidity": 0.05}

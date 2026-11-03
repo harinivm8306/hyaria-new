@@ -3,11 +3,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-SENSORS = ("ph", "ec", "water_temp", "air_temp", "humidity", "light_lux", "water_level", "pump_state")
+SENSORS = ("ph", "ec", "water_temp", "air_temp", "humidity", "light_lux", "water_level", "pump_state",
+           "n_ppm", "p_ppm", "k_ppm")   # ion-selective electrodes: nitrate-N, phosphate-P, K+
 ACTUATORS = {
     "mist": "s",        # run misting pump for N seconds
     "dose_a": "ml",     # nutrient stock A
     "dose_b": "ml",     # nutrient stock B
+    "dose_n": "ml",     # nitrogen stock (peristaltic pump via relay)
+    "dose_p": "ml",     # phosphorus stock
+    "dose_k": "ml",     # potassium stock
     "ph_down": "ml",
     "ph_up": "ml",
     "water_add": "L",   # top up / dilute with fresh water

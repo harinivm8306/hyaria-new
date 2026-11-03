@@ -1,0 +1,91 @@
+{
+  "classes": [
+    "healthy",
+    "k_deficient",
+    "n_deficient",
+    "p_deficient"
+  ],
+  "split": {
+    "healthy": {
+      "total": 12,
+      "train": 9,
+      "train_with_oversampling": 40,
+      "val": 3
+    },
+    "n_deficient": {
+      "total": 58,
+      "train": 46,
+      "train_with_oversampling": 46,
+      "val": 12
+    },
+    "p_deficient": {
+      "total": 66,
+      "train": 53,
+      "train_with_oversampling": 53,
+      "val": 13
+    },
+    "k_deficient": {
+      "total": 72,
+      "train": 58,
+      "train_with_oversampling": 58,
+      "val": 14
+    }
+  },
+  "eval": {
+    "val_images": 42,
+    "accuracy": 0.9285714285714286,
+    "recall": {
+      "healthy": 1.0,
+      "k_deficient": 0.9285714285714286,
+      "n_deficient": 0.8333333333333334,
+      "p_deficient": 1.0
+    },
+    "precision": {
+      "healthy": 0.75,
+      "k_deficient": 0.9285714285714286,
+      "n_deficient": 1.0,
+      "p_deficient": 0.9285714285714286
+    },
+    "confusion_matrix": {
+      "rows_true_cols_pred": [
+        "healthy",
+        "k_deficient",
+        "n_deficient",
+        "p_deficient"
+      ],
+      "matrix": [
+        [
+          3,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          13,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          10,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          13
+        ]
+      ]
+    }
+  },
+  "epochs": 40,
+  "imgsz": 224,
+  "seed": 0,
+  "train_minutes": 6.950366902351379,
+  "onnx_mb": 6.171365,
+  "trained_at": "2026-11-03",
+  "min_confidence": 0.6
+}

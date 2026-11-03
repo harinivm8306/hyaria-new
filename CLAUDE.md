@@ -21,6 +21,7 @@ Read these before larger work:
 | Fonts | Fontsource: Bricolage Grotesque (display), Geist (body), JetBrains Mono (data) — bundled, no Google Fonts fetch | `src/app/layout.tsx` |
 | Backend | Python 3.10+ · FastAPI · SQLAlchemy 2 (SQLite default) · httpx | `backend/` |
 | Control engine | `backend/hyaria/` package (threaded loop) | see below |
+| Plant photo model | YOLO11n-cls N/P/K classifier, ONNX via `onnxruntime` | `backend/models/npk_yolo11n_cls.onnx`, `backend/hyaria/vision.py` |
 | Legacy ML (old) | `backend/main.py` vision endpoints (YOLOv8 + MobileNetV2, PlantVillage classes — **no lettuce**) | optional deps |
 | Chatbot | `src/app/api/chat/route.ts` → local Ollama `llama3` at 127.0.0.1:11434 | |
 | Deploy | Vercel auto-deploys GitHub `main` → https://hyaria-new.vercel.app/ | |
@@ -36,7 +37,7 @@ python -m venv .venv && .venv\Scripts\activate        # Windows
 pip install -r requirements-core.txt                  # control loop + API only
 copy .env.example .env                                # set THINGSPEAK_* etc.
 python -m uvicorn main:app --reload --port 8000       # API docs: http://127.0.0.1:8000/docs
-python -m pytest -q                                   # 20 tests, incl. 3-day closed-loop sim
+python -m pytest -q                                   # 30 tests, incl. 3-day closed-loop sim + N/P/K
 
 # frontend (repo root)
 npm install
@@ -52,10 +53,10 @@ If no backend answers, `/dashboard` shows clearly labelled **demo data** (amber 
 
 - `config.py` — all settings from env / `backend/.env` (`HYARIA_DATA_SOURCE` = `hybrid` | `simulator` | `thingspeak`)
 - `engine.py` — tick: source.step → read → clean (A1) → store → stage (A5) → dosing (A2) / misting (A3) / lighting (A4) → safety (A12) → actuate → alerts (A6) → health (A7)
-- `sensing.py` A1 · `control/dosing.py` A2 · `control/misting.py` A3 · `control/lighting.py` A4 · `recipes.py` + `recipes/*.json` A5 · `alerts.py` A6 · `health.py` A7 · `control/safety.py` A12
+- `sensing.py` A1 · `control/dosing.py` A2 · `control/npk.py` A16 (N/P/K ions + camera) · `vision.py` (photo model, canopy %) · `control/misting.py` A3 · `control/lighting.py` A4 · `recipes.py` + `recipes/*.json` A5 · `alerts.py` A6 · `health.py` A7 · `control/safety.py` A12
 - `sources/` — `simulator.py` (virtual tank that reacts to commands; hidden "true" gains K_TRUE etc.), `thingspeak.py`, `hybrid.py` (real ThingSpeak sensors + simulated rest)
-- `api.py` — `/api/status`, `/api/devices/{id}/live|history|history/all|actions|override|mode|cycle`, `/api/alerts`, `/api/alerts/{id}/ack`, `/api/recipes/{crop}`, `/api/sim/fault`
-- `db.py` — tables readings, actions, alerts, crop_cycles, controller_state
+- `api.py` — `/api/devices/{id}/images` (camera), `/api/images/{id}/file`, `/api/vision/npk`, `/api/status`, `/api/devices/{id}/live|history|history/all|actions|override|mode|cycle`, `/api/alerts`, `/api/alerts/{id}/ack`, `/api/recipes/{crop}`, `/api/sim/fault`
+- `db.py` — tables readings, actions, alerts, crop_cycles, controller_state, images (photos saved under `backend/data/images/`, gitignored)
 - `main.py` — FastAPI app, starts engine in lifespan; vision libs optional (TF/ultralytics/cv2 imported in try/except)
 
 ## Frontend layout
@@ -63,7 +64,8 @@ If no backend answers, `/dashboard` shows clearly labelled **demo data** (amber 
 - `src/app/globals.css` — design system "dark bio-lab": colour tokens `--c-*` with `.light` overrides, mapped to Tailwind via `@theme inline` (`primary`=leaf green, `secondary`=grow-light violet, `accent`=amber, `mist`, `danger`, `line`, `card-2`, `faint`). Utilities: `panel`, `panel-hi`, `glass`, `eyebrow`, `num`, `chip chip-real chip-sim`, `btn btn-primary btn-ghost`, `grid-bg`, `hotspot*`.
 - `src/components/three/AeroChamber.tsx` — 3D digital twin of the 3-tier chamber (tiers at y 0/0.9/1.9/2.9, W 2.0, D 1.2, 4 net pots). Props: `state {mistOn, ledPwm, growth 0..1, waterLevel, health, pumpFault}`, `focus` preset, `story` ref (landing scroll), `interactive`, `hotspots`, `fov`. `ChamberView.tsx` lazy-loads it (ssr:false) and pauses rendering off-screen. `shaders.ts` = mist, water, LED beam, spores.
 - `src/components/landing/Landing.tsx` — 520vh pinned scroll story; camera stops at progress 0.232/0.458/0.685/0.911 (mist / nutrient+pH / light / plant intelligence chapters).
-- `src/app/dashboard/page.tsx` — command centre; `src/components/dashboard/demo.ts` demo data.
+- `src/app/dashboard/page.tsx` — command centre (+ `NutrientCard.tsx` N/P/K, plant camera panel); `src/components/dashboard/demo.ts` demo data.
+- `src/app/plants/page.tsx` — plant camera: capture/upload, auto-capture, timeline by day, canopy curve, model card.
 - `src/lib/api.ts` — `API_BASE` from `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`).
 - Older pages (`/problem`, `/solution`, `/architecture`, `/ai`, `/prototype`, `/results`, `/research`, `/dataset`, `/impact`, `/team`, `/contact`, `/detector`, `/demo`) inherit tokens/fonts but are **not yet redesigned**.
 
@@ -80,8 +82,9 @@ If no backend answers, `/dashboard` shows clearly labelled **demo data** (amber 
 
 ## Where we left off (Nov 2026)
 
-1. **Last request, in progress:** (a) add a **plant camera** to the UI to track plants over time; (b) **N, P, K stored separately** (peristaltic pumps N/P/K via relay, slide block diagram), **ion-selective electrode (ISE) sensors** measure NO₃⁻ / H₂PO₄⁻ / K⁺, combined with **camera-detected deficiency**, to decide which nutrient to dose into the solution; (c) **start implementing an AI model** — plan: fine-tune YOLO11n-cls on the CC0 lettuce NPK image dataset (github.com/ramimalik782/Lettuce-NPK-dataset) and export ONNX. Designs in `docs/ROADMAP.md` §1 and `docs/AI_MODELS.md`.
-2. Then: Simulation Lab page (3D), plant growth page, restyle inner pages, two-board firmware, login/PWA, DQN in simulator, grounded chatbot, resource accounting, recommendations.
+1. **Done 3 Nov 2026:** plant camera (`/plants` page + dashboard panel, `src/components/plants/PlantCamera.tsx`), image storage + API (`images` table, `hyaria/vision.py`), A16 N/P/K fusion dosing (`control/npk.py`, sensors `n_ppm/p_ppm/k_ppm`, actuators `dose_n/p/k`, safety limits), first AI model (YOLO11n-cls N/P/K classifier, ONNX in `backend/models/`, 93% on 42 held-out photos, experimental; script `backend/training/train_npk.py`). 30 tests.
+   Original request was: (a) add a **plant camera** to the UI to track plants over time; (b) **N, P, K stored separately** (peristaltic pumps N/P/K via relay, slide block diagram), **ion-selective electrode (ISE) sensors** measure NO₃⁻ / H₂PO₄⁻ / K⁺, combined with **camera-detected deficiency**, to decide which nutrient to dose into the solution; (c) **start implementing an AI model** — plan: fine-tune YOLO11n-cls on the CC0 lettuce NPK image dataset (github.com/ramimalik782/Lettuce-NPK-dataset) and export ONNX. Designs in `docs/ROADMAP.md` §1 and `docs/AI_MODELS.md`.
+2. Next: test the model on real chamber photos; 3D stock bottles/pumps in the twin; Simulation Lab page (3D), plant growth page, restyle inner pages, two-board firmware, login/PWA, DQN in simulator, grounded chatbot, resource accounting, recommendations.
 
 ## graphify
 

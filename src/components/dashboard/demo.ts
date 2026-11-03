@@ -1,7 +1,7 @@
 // Demo data for when no HY-ARIA backend is reachable (e.g. the public Vercel site).
 // Always shown with a "Demo data" banner; never presented as real readings.
 
-const SENSORS = ["ph", "ec", "water_temp", "air_temp", "humidity", "light_lux", "water_level", "pump_state"] as const;
+const SENSORS = ["ph", "ec", "water_temp", "air_temp", "humidity", "light_lux", "water_level", "pump_state", "n_ppm", "p_ppm", "k_ppm"] as const;
 
 function wave(t: number, period: number, phase = 0) {
   return Math.sin((t / period) * Math.PI * 2 + phase);
@@ -19,6 +19,9 @@ function valuesAt(t: number) {
     light_lux: day ? 9000 + 5000 * Math.max(0, wave(t, 86400, -1.57)) : 40,
     water_level: 82 - ((t / 3600) % 24) * 0.25,
     pump_state: (t % 240) < 5 ? 1 : 0,
+    n_ppm: 162 + 9 * wave(t, 7200, 2),
+    p_ppm: 44 + 3 * wave(t, 9000, 1),
+    k_ppm: 205 + 12 * wave(t, 7200, 2.4),
   } as Record<(typeof SENSORS)[number], number>;
 }
 
@@ -35,7 +38,7 @@ export function demoLive(now = Date.now() / 1000) {
     crop: "lettuce",
     crop_name: "Lettuce",
     day: 18.4,
-    stage: { name: "Vegetative", ph: [5.8, 6.2], ec: [1.2, 1.6], air_temp: [18, 24], humidity: [55, 70], water_temp: [18, 22], dli: 14 },
+    stage: { name: "Vegetative", ph: [5.8, 6.2], ec: [1.2, 1.6], air_temp: [18, 24], humidity: [55, 70], water_temp: [18, 22], dli: 14, npk: { n: [140, 190], p: [35, 55], k: [180, 240] } },
     readings,
     vpd_kpa: 0.98,
     health: { score: 96, band: "Good", reason: "all parameters inside the recipe range" },
@@ -44,6 +47,11 @@ export function demoLive(now = Date.now() / 1000) {
       dosing: { k_ec: 0.47, b_down: 1.14, b_up: 1.0, pending: null, mixing_until: null },
       misting: { last_mist_at: now - (now % 240), next_mist_at: now - (now % 240) + 240, why: "base 4 min, VPD 0.98 kPa x0.92" },
       lighting: { dli_so_far: 6.2, dli_target: 14, hours_left: 9.5, pwm: 55 },
+      npk: {
+        status: { n: { state: "ok", why: "in 140-190" }, p: { state: "ok", why: "in 35-55" }, k: { state: "ok", why: "in 180-240" }, note: "Idle" },
+        pending: null, mixing_until: null, gains: { n: 6.8, p: 3.1, k: 8.7 },
+        camera: { label: null, confidence: 0, streak: 0, ts: null },
+      },
     },
     notes: [],
   };
@@ -62,6 +70,7 @@ export function demoHistory(hours: number, now = Date.now() / 1000) {
 
 export function demoActions(now = Date.now() / 1000) {
   return [
+    { id: 6, ts: now - 7200, actuator: "dose_k", amount: 9.4, unit: "ml", source: "ai", status: "done", reason: "Potassium (K) 171 ppm below 180-240; target 210, gain 8.7 ppm per ml/L" },
     { id: 5, ts: now - 60, actuator: "mist", amount: 4, unit: "s", source: "ai", status: "done", reason: "interval 3.7 min (base 4 min, VPD 0.98 kPa x0.92)" },
     { id: 4, ts: now - 900, actuator: "led", amount: 55, unit: "%", source: "ai", status: "done", reason: "need 214 umol/m2/s for 9.5 h to reach DLI 14" },
     { id: 3, ts: now - 2400, actuator: "ph_down", amount: 6.2, unit: "ml", source: "ai", status: "done", reason: "pH 6.31 outside 6.0+/-0.2; b_down=1.14" },

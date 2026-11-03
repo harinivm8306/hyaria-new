@@ -69,6 +69,24 @@ controller_state = Table(
     Column("updated_at", Float, nullable=False),
 )
 
+images = Table(
+    "images", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("ts", Float, nullable=False),
+    Column("device_id", String(64), nullable=False),
+    Column("path", Text, nullable=False),          # relative to settings.images_dir
+    Column("width", Integer),
+    Column("height", Integer),
+    Column("day", Float),                          # days since planting
+    Column("stage", String(32)),
+    Column("canopy_pct", Float),                   # green leaf share of the photo
+    Column("npk_label", String(32)),               # healthy | n_deficient | ... | None if no model
+    Column("npk_confidence", Float),
+    Column("result_json", Text),
+    Column("note", Text),
+)
+Index("ix_images_dev_ts", images.c.device_id, images.c.ts)
+
 _engine = None
 
 
@@ -178,6 +196,34 @@ def start_cycle(device_id: str, crop: str, planted_at: float) -> dict:
                                                crop_cycles.c.harvested_at.is_(None)).values(harvested_at=planted_at))
         conn.execute(insert(crop_cycles), {"device_id": device_id, "crop": crop, "planted_at": planted_at})
     return active_cycle(device_id)
+
+
+def insert_image(row: dict) -> int:
+    with get_engine().begin() as conn:
+        return conn.execute(insert(images), row).inserted_primary_key[0]
+
+
+def _image_row(r) -> dict:
+    d = dict(r._mapping)
+    d["result"] = json.loads(d.pop("result_json") or "{}")
+    return d
+
+
+def list_images(device_id: str, limit: int = 200) -> list[dict]:
+    q = select(images).where(images.c.device_id == device_id).order_by(images.c.ts.desc()).limit(limit)
+    with get_engine().connect() as conn:
+        return [_image_row(r) for r in conn.execute(q)]
+
+
+def get_image(image_id: int) -> dict | None:
+    with get_engine().connect() as conn:
+        row = conn.execute(select(images).where(images.c.id == image_id)).first()
+    return _image_row(row) if row else None
+
+
+def delete_image(image_id: int) -> None:
+    with get_engine().begin() as conn:
+        conn.execute(delete(images).where(images.c.id == image_id))
 
 
 def prune_readings(older_than: float) -> None:

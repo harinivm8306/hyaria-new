@@ -5,21 +5,21 @@ Loop: clean the reading → compare to the crop recipe → compute an action →
 | ID | Algorithm | Status | Code |
 | --- | --- | --- | --- |
 | A1 | Sensor cleaning | Built | `sensing.py` |
-| A2 | Nutrient (EC) + pH dosing | Built (A+B two-part; N/P/K version planned) | `control/dosing.py` |
+| A2 | Nutrient (EC) + pH dosing | Built (A+B base mix holds total EC; ion balance is A16) | `control/dosing.py` |
 | A3 | Adaptive misting | Built | `control/misting.py` |
 | A4 | DLI lighting | Built | `control/lighting.py` |
 | A5 | Crop recipes + stage | Built (days-based) | `recipes.py`, `recipes/*.json` |
 | A6 | Alerts | Built | `alerts.py` |
 | A7 | Health score | Built (environment part) | `health.py` |
-| A8 | Disease detection | Old PlantVillage pipeline; lettuce model planned | `main.py` |
-| A9 | Growth stage / canopy | Planned (camera) | — |
+| A8 | Disease detection | Old PlantVillage pipeline; lettuce model planned. N/P/K deficiency model built (see AI_MODELS.md) | `main.py`, `vision.py` |
+| A9 | Growth stage / canopy | Canopy cover % per photo built; stage from camera planned | `vision.py` |
 | A10 | Harvest forecast (GDD) | Planned | — |
 | A11 | Short-term forecasting | Planned (Chronos-Bolt-tiny) | — |
 | A12 | Safety interlocks | Built | `control/safety.py` |
 | A13 | Resource accounting | Planned | — |
 | A14 | Grounded AI advisor | Planned | `src/app/api/chat` |
 | A15 | Crop recommender | Planned | — |
-| A16 | Ion-selective N/P/K fusion dosing | Planned (ROADMAP §1b) | — |
+| A16 | Ion-selective N/P/K fusion dosing | Built on simulator (no real ISE probes yet) | `control/npk.py` |
 
 ## A1 Sensor cleaning
 Window of 5 → Hampel filter (|x − median| > 3·1.4826·MAD ⇒ replace with median) → EMA α = 0.3 → range check (pH 0–14, etc. ⇒ `FAULT`) → stuck check (std over 30 min < noise floor, pH 0.005 ⇒ `STUCK`). Helpers: pH two-point calibration (`pH = 7 + (V − V7)·3/(V7 − V4)`), EC temperature compensation `EC25 = EC_T / (1 + 0.02(T − 25))`.
@@ -46,7 +46,14 @@ Per-parameter desirability 1 inside band, linear to 0 at tolerance (pH 0.5, EC 0
 Canopy: fixed top camera, ExG = 2G − R − B + Otsu, cm² via marker, logistic fit `A(t) = K/(1+e^(−r(t−t0)))`, stage by fraction of K. Harvest: GDD = Σ max(0, T_mean − 4 °C). Forecast: Chronos-Bolt-tiny or Holt/LightGBM; act early if forecast crosses a limit.
 
 ## A12 Safety
-Tank < 15 % ⇒ pumps locked; level unknown ⇒ locked; mist ≤ 30 s; nutrient dose ≤ 60 ml; pH dose ≤ 20 ml and blocked while nutrients mix (except manual); water add ≤ 20 L; LED 0–100 %; expired commands rejected. ESP32 firmware must repeat the critical limits.
+Tank < 15 % ⇒ pumps locked; level unknown ⇒ locked; mist ≤ 30 s; nutrient dose ≤ 60 ml; N/P/K dose ≤ 30 ml, locked at EC ≥ 2.2 mS/cm and while any other dose mixes (except manual); pH dose ≤ 20 ml and blocked while nutrients mix (except manual); water add ≤ 20 L; LED 0–100 %; expired commands rejected. ESP32 firmware must repeat the critical limits.
 
-## A16 Ion-selective N/P/K fusion (planned)
-See `docs/ROADMAP.md` §1b: ISE reading vs target band decides dosing; camera deficiency confirms; vision-only deficiency raises an uptake-problem alert instead of overdosing.
+## A16 Ion-selective N/P/K fusion dosing
+Three stock bottles (N, P, K), one peristaltic pump each (relay). Ion-selective electrodes give nitrate-N, phosphate-P and K⁺ in ppm (`n_ppm`, `p_ppm`, `k_ppm`); each recipe stage has a band per ion (`npk` in `recipes/lettuce.json`).
+- Runs only when A2 is idle (no EC/pH dose mixing) and pH is inside its band (uptake depends on pH).
+- Ion below band ⇒ dose that nutrient: `ml = 0.7 · (target − ppm) · V / gain`, clamp 0.5–30 ml. One nutrient per cycle, the one furthest below its band (relative). Max 2 doses per hour.
+- Wait 15 min, re-measure, learn `gain ← gain + 0.2 · (observed − gain)`. A dose that moved the ion < 20 % of expected ⇒ "check bottle, pump, sensor" alert (empty bottle).
+- Camera: a photo result counts only at ≥ 60 % confidence and when 2 photos in a row agree. The camera alone never doses. Camera deficient + ion in band ⇒ "possible uptake problem: check pH, root temperature, roots" alert. Camera deficient + ion sensor not reading ⇒ "test by hand" alert.
+- Ion above band ⇒ no action here; A2 dilution handles total salt.
+- Why both A/B and N/P/K: the A/B base mix keeps EC (total salt) on target; plants take up N and K faster than P, so the ratio drifts and A16 corrects single ions.
+- Simulator: ions deplete at different rates (`ION_UPTAKE`), A/B adds them in a fixed ratio, each N/P/K pump has a hidden true gain; faults `low_n|p|k` (fast uptake) and `empty_n|p|k` (bottle empty).

@@ -8,3 +8,4 @@ python-multipart
 numpy
 pillow
 pytest>=8
+onnxruntime>=1.17        # N/P/K plant photo model (hyaria/vision.py); optional, photos still save without it

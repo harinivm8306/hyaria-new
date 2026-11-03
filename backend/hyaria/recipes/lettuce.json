@@ -1,7 +1,7 @@
 {
   "crop": "lettuce",
   "display_name": "Lettuce",
-  "note": "Starting values for leafy lettuce in aeroponics. Tune on your own rig.",
+  "note": "Starting values for leafy lettuce in aeroponics. Tune on your own rig. npk = ion targets in ppm (nitrate-N, P, K), based on common hydroponic lettuce solutions (about 150 N / 40-50 P / 200 K at full strength); verify against your own leaf tests.",
   "cycle_days": 40,
   "t_base_c": 4.0,
   "photoperiod": {"start_hour": 6, "hours": 16},
@@ -12,12 +12,15 @@
   "stages": [
     {"name": "Seedling", "from_day": 0, "to_day": 10,
      "ph": [5.8, 6.2], "ec": [0.8, 1.2], "air_temp": [20, 24], "humidity": [65, 75], "water_temp": [18, 22],
+     "npk": {"n": [100, 150], "p": [30, 45], "k": [130, 180]},
      "dli": 11, "mist_on_s": 4, "mist_off_min": 5},
     {"name": "Vegetative", "from_day": 10, "to_day": 25,
      "ph": [5.8, 6.2], "ec": [1.2, 1.6], "air_temp": [18, 24], "humidity": [55, 70], "water_temp": [18, 22],
+     "npk": {"n": [140, 190], "p": [35, 55], "k": [180, 240]},
      "dli": 14, "mist_on_s": 4, "mist_off_min": 4},
     {"name": "Mature", "from_day": 25, "to_day": 999,
      "ph": [5.8, 6.2], "ec": [1.4, 1.8], "air_temp": [17, 22], "humidity": [50, 65], "water_temp": [18, 22],
+     "npk": {"n": [150, 200], "p": [40, 60], "k": [200, 250]},
      "dli": 16, "mist_on_s": 5, "mist_off_min": 3}
   ]
 }

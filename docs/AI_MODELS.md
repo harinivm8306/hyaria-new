@@ -7,12 +7,22 @@ Goal: lightweight, offline, honest. Prefer pretrained/open models; export to ONN
 | Report module | Plan | Status |
 | --- | --- | --- |
 | CNN disease detection | Lettuce-specific classifier (below) + lettuce detector gate | old PlantVillage model in `backend/main.py` has **no lettuce classes** |
-| Nutrient deficiency (nutrient module) | **YOLO11n-cls fine-tuned on CC0 lettuce NPK dataset** (training started, see ROADMAP §1c) or Verdant MobileNetV2 | in progress |
+| Nutrient deficiency (nutrient module) | **YOLO11n-cls fine-tuned on CC0 lettuce NPK dataset** → `backend/models/npk_yolo11n_cls.onnx` | **built, experimental**: 93% on 42 held-out photos (see `backend/models/NPK_MODEL_CARD.md`) |
 | LSTM growth stage | Verdant growth model (4 stages) or canopy-area tracking from camera | planned |
 | Predictive growth & nutrient (LSTM) | amazon/chronos-bolt-tiny zero-shot forecaster (34.6 MB, Apache-2.0) | planned |
 | DQN environment optimiser | Train in our simulator (stable-baselines3 or custom), behind safety layer | planned |
 | LLM AI advisor | Existing Ollama route; switch to a 1–3B model for laptops; ground with live data | partly built |
 | Plant identification | crop comes from the active crop cycle (CLIP was too heavy) | — |
+
+## Built: lettuce N/P/K deficiency classifier (3 Nov 2026)
+
+- Script: `backend/training/train_npk.py` (needs `ultralytics`, `onnx`, `onnxslim` for training only). Dataset cloned to `C:\Users\harin\Aeroponics\datasets\Lettuce-NPK-dataset` (outside the repo).
+- Split: stratified 80/20, seed 0, at least 3 val images per class; healthy (12 photos) oversampled to 40 in train only.
+- Training: YOLO11n-cls ImageNet weights, 224 px, CPU, up to 40 epochs, early stop (patience 15), flips/rotation/HSV/erasing. About 7 minutes on Harini's laptop.
+- Result: 93% accuracy on 42 held-out photos, measured with the ONNX file. The best epoch was chosen on the same split, so slightly optimistic; healthy has only 3 val photos.
+- Runtime: `backend/hyaria/vision.py` (onnxruntime, 6.2 MB). Preprocess = short side 224, centre crop, /255 (Ultralytics defaults, no mean/std). Classes in `npk_classes.json`: healthy, k_deficient, n_deficient, p_deficient. < 60 % confidence ⇒ "retake photo".
+- API: `POST /api/devices/{id}/images` (store + analyse + feed A16), `GET /api/devices/{id}/images`, `GET /api/images/{id}/file`, `DELETE /api/images/{id}`, `GET|POST /api/vision/npk` (model info / try a photo without saving).
+- Next: test on 10–20 chamber photos; if accuracy drops, add our photos and retrain (same script).
 
 ## Candidate pretrained models found (Hugging Face, checked 3 Nov 2026)
 

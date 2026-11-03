@@ -6,13 +6,16 @@ import {
   Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  AlertTriangle, Beaker, Bot, CheckCircle2, CloudOff, Droplets, FlaskConical, Gauge, Hand, Lightbulb,
+  AlertTriangle, Beaker, Bot, Camera, CheckCircle2, CloudOff, Droplets, FlaskConical, Gauge, Hand, Lightbulb,
   Thermometer, Timer, Waves, Zap,
 } from "lucide-react";
 import ChamberView from "@/components/three/ChamberView";
 import type { FocusKey, Hotspot } from "@/components/three/AeroChamber";
 import { API_BASE, DEVICE_ID, apiGet, apiPost } from "@/lib/api";
 import { demoActions, demoHistory, demoLive } from "@/components/dashboard/demo";
+import NutrientCard from "@/components/dashboard/NutrientCard";
+import { NPK_TEXT, type PlantImage } from "@/components/plants/PlantCamera";
+import Link from "next/link";
 
 type Reading = { value: number | null; raw: number | null; status: string; source: string; ts: number };
 type Point = { ts: number; value: number | null };
@@ -48,6 +51,7 @@ export default function Dashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
   const [focus, setFocus] = useState<FocusKey>("overview");
+  const [photo, setPhoto] = useState<PlantImage | null>(null);
 
   const loadLive = useCallback(async () => {
     try {
@@ -56,6 +60,7 @@ export default function Dashboard() {
         apiGet(`/api/devices/${DEVICE_ID}/actions?limit=30`, 4000),
       ]);
       setLive(l); setActions(a); setDemo(false);
+      apiGet<PlantImage[]>(`/api/devices/${DEVICE_ID}/images?limit=1`, 4000).then((p) => setPhoto(p[0] ?? null)).catch(() => {});
     } catch {
       setDemo(true); setLive(demoLive()); setActions(demoActions());
     }
@@ -132,10 +137,11 @@ export default function Dashboard() {
     { id: "plants", label: "Canopy", value: stage?.name, position: [0.6, 2.35, 0.25], tone: "leaf" },
     { id: "env", label: "DHT11", value: v("air_temp") != null ? `${v("air_temp")!.toFixed(1)}° · ${Math.round(v("humidity") ?? 0)}%` : "–", position: [-0.98, 2.62, 0.45], tone: "amber" },
     { id: "roots", label: "Mist", value: pumpFault ? "fault" : nextMist != null ? `in ${Math.floor(nextMist / 60)}:${String(nextMist % 60).padStart(2, "0")}` : "–", position: [0.35, 1.25, 0.2], tone: pumpFault ? "red" : "mist" },
+    { id: "camera", label: "Camera", value: photo?.npk_label ? (NPK_TEXT[photo.npk_label] ?? photo.npk_label).replace(" deficient", " low") : "no photo", position: [0.05, 3.1, 0.35], tone: photo?.npk_label && photo.npk_label !== "healthy" ? "amber" : "leaf" },
     { id: "reservoir", label: "pH · EC", value: v("ph") != null ? `${v("ph")!.toFixed(2)} · ${v("ec")?.toFixed(2)}` : "–", position: [-0.45, 0.62, 0.3], tone: "leaf" },
   ];
   const onHotspot = (id: string) => {
-    const map: Record<string, FocusKey> = { canopy: "canopy", plants: "canopy", env: "canopy", roots: "roots", reservoir: "reservoir" };
+    const map: Record<string, FocusKey> = { camera: "canopy", canopy: "canopy", plants: "canopy", env: "canopy", roots: "roots", reservoir: "reservoir" };
     setFocus(map[id] ?? "overview");
   };
 
@@ -347,6 +353,27 @@ export default function Dashboard() {
           </div>
 
           <div className="lg:col-span-4 grid gap-4 content-start">
+            <NutrientCard readings={R} stage={stage} npk={ctrl.npk} demo={demo} real={realSensors} />
+
+            <section className="panel p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="eyebrow">Plant camera</p>
+                <Link href="/plants" className="text-xs text-text-muted hover:text-foreground">Open timeline →</Link>
+              </div>
+              {photo ? (
+                <Link href="/plants" className="flex gap-3 items-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`${API_BASE}${photo.url}`} alt="Latest plant photo" className="w-20 h-20 rounded-xl object-cover border border-line" />
+                  <div className="text-sm min-w-0">
+                    <p>{photo.npk_label ? `${NPK_TEXT[photo.npk_label]} · ${Math.round((photo.npk_confidence ?? 0) * 100)}%` : "No model result"}</p>
+                    <p className="text-xs text-faint mt-1">Canopy {photo.canopy_pct}% · {new Date(photo.ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p>
+                  </div>
+                </Link>
+              ) : (
+                <Link href="/plants" className="flex items-center gap-2 text-sm text-text-muted hover:text-foreground"><Camera size={15} /> {demo ? "Photos need the backend running" : "Take the first plant photo"}</Link>
+              )}
+            </section>
+
             <section className="panel p-5">
               <div className="flex items-center justify-between mb-1">
                 <p className="eyebrow">Manual control</p>
@@ -360,6 +387,9 @@ export default function Dashboard() {
                 <CtrlButton busy={busy} label="pH down 2 ml" icon={FlaskConical} onClick={() => override("ph_down", 2, "pH down 2 ml")} />
                 <CtrlButton busy={busy} label="pH up 2 ml" icon={FlaskConical} onClick={() => override("ph_up", 2, "pH up 2 ml")} />
                 <CtrlButton busy={busy} label="LED off" icon={Lightbulb} onClick={() => override("led", 0, "LED off")} />
+                <CtrlButton busy={busy} label="N 5 ml" icon={Beaker} onClick={() => override("dose_n", 5, "N 5 ml")} />
+                <CtrlButton busy={busy} label="P 5 ml" icon={Beaker} onClick={() => override("dose_p", 5, "P 5 ml")} />
+                <CtrlButton busy={busy} label="K 5 ml" icon={Beaker} onClick={() => override("dose_k", 5, "K 5 ml")} />
               </div>
             </section>
 
@@ -371,7 +401,7 @@ export default function Dashboard() {
                 </div>
                 <p className="text-xs text-text-muted mb-4">Inject a fault into the simulated parts and watch alerts and safety respond.</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {[["pump_fail", "Pump failure"], ["ph_stuck", "pH probe stuck"], ["leak", "Tank leak"], ["heatwave", "Heatwave"]].map(([f, label]) => {
+                  {[["pump_fail", "Pump failure"], ["ph_stuck", "pH probe stuck"], ["leak", "Tank leak"], ["heatwave", "Heatwave"], ["low_n", "Plants strip N"], ["low_k", "Plants strip K"]].map(([f, label]) => {
                     const on = faults.includes(f);
                     return (
                       <button key={f} disabled={!!busy}

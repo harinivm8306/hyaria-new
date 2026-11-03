@@ -18,6 +18,8 @@ from .control import safety
 from .control.dosing import DosingState, dosing_step
 from .control.lighting import LightState, lighting_step, photoperiod_hours_left
 from .control.misting import misting_step
+from .control.npk import NUTRIENTS, SENSOR as NPK_SENSOR, NpkState, npk_step
+from .control.safety import NPK
 from .health import health_score
 from .models import ACTUATORS, SENSORS, Command
 from .physics import vpd_kpa
@@ -69,6 +71,8 @@ class Engine:
         self.bank = SensorBank()
         saved = db.load_controller_state(s.device_id)
         self.dosing = DosingState.from_dict(saved.get("dosing", {}))
+        self.npk = NpkState.from_dict(saved.get("npk", {}))
+        self.npk_status: dict = {}
         self.light = LightState(**saved.get("light", {})) if saved.get("light") else LightState()
         self.last_mist_at: float | None = saved.get("last_mist_at")
         self.next_mist_at: float | None = None
@@ -110,11 +114,19 @@ class Engine:
         """True while a nutrient (EC) dose or dilution is still mixing in the tank."""
         return self.dosing.pending in ("ec", "dilute") and now < self.dosing.wait_until
 
+    def _ph_mixing(self, now: float) -> bool:
+        return self.dosing.pending in ("ph_down", "ph_up") and now < self.dosing.wait_until
+
     # ------------------------------------------------------------------ actuation
     def execute(self, cmd: Command, now: float) -> dict:
         row = {"ts": now, "device_id": self.s.device_id, "actuator": cmd.actuator, "amount": cmd.amount,
                "unit": cmd.unit, "reason": cmd.reason, "source": cmd.source}
-        ok, why = safety.check(cmd, now, self._v("water_level"), self._ok("water_level"), self._mixing(now))
+        if cmd.actuator in NPK:
+            mixing = self._mixing(now)
+        else:
+            mixing = self._mixing(now) or self.npk.mixing(now)
+        ok, why = safety.check(cmd, now, self._v("water_level"), self._ok("water_level"), mixing,
+                               self._ph_mixing(now), self._v("ec"))
         if not self.source.can_actuate:
             row.update(status="advisory", reason=f"{cmd.reason} | no actuator link: do this manually")
         elif not ok:
@@ -168,14 +180,25 @@ class Engine:
 
             if self.auto:
                 cmds: list[Command] = []
-                # A2 dosing
-                dcmds, dnotes = dosing_step(self.dosing, now, self._v("ec"), self._v("ph"), self._volume_l(),
-                                            self.s.tank_capacity_l, stage, self._ok("ec"), self._ok("ph"))
+                # A2 dosing (base A/B mix + pH); waits while an N/P/K dose mixes
+                dcmds, dnotes = [], []
+                if not self.npk.mixing(now):
+                    dcmds, dnotes = dosing_step(self.dosing, now, self._v("ec"), self._v("ph"), self._volume_l(),
+                                                self.s.tank_capacity_l, stage, self._ok("ec"), self._ok("ph"))
                 self.notes += dnotes
                 dosing_done = [self.execute(c, now)["status"] == "done" for c in dcmds]
                 if dcmds and not all(dosing_done):
                     # never learn from a dose that did not happen
                     self.dosing.pending = None
+                # A16 N/P/K balance: only when A2 is idle
+                if not dcmds and not self.dosing.pending:
+                    ncmds, self.npk_status, npk_issues = self._npk(now, stage)
+                    if ncmds and self.execute(ncmds[0], now)["status"] != "done":
+                        self.npk.pending = None
+                        self.npk.dose_times.pop()
+                else:   # show the status anyway, decide nothing
+                    _, self.npk_status, npk_issues = self._npk(now, stage, observe_only=True)
+                    self.npk_status["note"] = "waiting for the EC / pH dose to finish mixing"
                 # A3 misting
                 mcmds, self.next_mist_at, self.mist_why = misting_step(
                     now, self.last_mist_at, stage, self._v("air_temp"), self._v("humidity"), self._v("water_temp"), lights_on)
@@ -187,6 +210,9 @@ class Engine:
                     self.execute(c, now)
             else:
                 self.notes.append("automatic control paused (manual mode)")
+                _, self.npk_status, npk_issues = self._npk(now, stage, observe_only=True)
+
+            self.alerts.extra = npk_issues
 
             # A6 alerts
             self.alerts.dose_issue = self.dosing.response_issue
@@ -198,7 +224,25 @@ class Engine:
     def _save_state(self) -> None:
         db.save_controller_state(self.s.device_id, {
             "dosing": self.dosing.to_dict(), "light": asdict(self.light),
-            "last_mist_at": self.last_mist_at, "auto": self.auto})
+            "last_mist_at": self.last_mist_at, "auto": self.auto, "npk": self.npk.to_dict()})
+
+    def _npk(self, now: float, stage: dict, observe_only: bool = False):
+        ions = {n: self._v(NPK_SENSOR[n]) for n in NUTRIENTS}
+        ph, (lo, hi) = self._v("ph"), stage["ph"]
+        ph_in_band = ph is not None and lo <= ph <= hi
+        if observe_only:   # status for the UI without touching dose state
+            probe = NpkState.from_dict(self.npk.to_dict())
+            probe.dose_times = [now] * 99
+            _, status, issues = npk_step(probe, now, ions, self._volume_l(), stage, ph_in_band)
+            status["note"] = "automatic control paused (manual mode)"
+            return [], status, issues
+        return npk_step(self.npk, now, ions, self._volume_l(), stage, ph_in_band)
+
+    def note_vision(self, npk_result: dict, ts: float | None = None) -> None:
+        """A new plant photo was analysed: let A16 use the camera's opinion."""
+        with self.lock:
+            self.npk.note_vision(npk_result, ts if ts is not None else (self.last_tick or self.clock()))
+            self._save_state()
 
     # ------------------------------------------------------------------ API helpers
     def override(self, actuator: str, amount: float, reason: str = "manual override") -> dict:
@@ -260,6 +304,11 @@ class Engine:
                                if self.dosing.pending and now < self.dosing.wait_until else None},
                     "misting": {"last_mist_at": self.last_mist_at, "next_mist_at": self.next_mist_at, "why": self.mist_why},
                     "lighting": self.light_info,
+                    "npk": {"status": self.npk_status, "pending": self.npk.pending,
+                            "mixing_until": self.npk.wait_until if self.npk.mixing(now) else None,
+                            "gains": {n: round(self.npk.gain(n), 2) for n in NUTRIENTS},
+                            "camera": {"label": self.npk.vision_label, "confidence": self.npk.vision_conf,
+                                       "streak": self.npk.vision_streak, "ts": self.npk.vision_ts}},
                 },
                 "notes": self.notes,
             }

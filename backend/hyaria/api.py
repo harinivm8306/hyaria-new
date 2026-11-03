@@ -1,17 +1,23 @@
 """REST API for the farmer app. Mounted under /api by main.py."""
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import db
 from .models import ACTUATORS, SENSORS
 from .recipes import list_crops, load_recipe, save_recipe
+from . import vision
 
 router = APIRouter(prefix="/api", tags=["hyaria"])
+MAX_IMAGE_BYTES = 12 * 1024 * 1024
+SIM_FAULTS = ("pump_fail", "ph_stuck", "leak", "heatwave", "low_n", "low_p", "low_k", "empty_n", "empty_p", "empty_k")
 _engine = None
 
 
@@ -49,7 +55,7 @@ class CycleIn(BaseModel):
 
 
 class FaultIn(BaseModel):
-    fault: str = Field(..., description="pump_fail | ph_stuck | leak | heatwave")
+    fault: str = Field(..., description="pump_fail | ph_stuck | leak | heatwave | low_n | low_p | low_k | empty_n | empty_p | empty_k")
     on: bool = True
 
 
@@ -165,7 +171,101 @@ def sim_fault(body: FaultIn):
     sim = eng().simulator()
     if sim is None:
         raise HTTPException(400, "no simulator in this data source")
-    if body.fault not in ("pump_fail", "ph_stuck", "leak", "heatwave"):
+    if body.fault not in SIM_FAULTS:
         raise HTTPException(400, "unknown fault")
     sim.set_fault(body.fault, body.on)
     return sim.info()
+
+
+# ---------------------------------------------------------------- plant camera (1a) + N/P/K model (1c)
+
+async def _read_image(file: UploadFile) -> bytes:
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty file")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "photo larger than 12 MB")
+    return data
+
+
+def _analyse(data: bytes) -> dict:
+    try:
+        return vision.analyse(data)
+    except Exception:
+        raise HTTPException(400, "not a readable image (use JPG or PNG)")
+
+
+def _image_out(row: dict) -> dict:
+    row = dict(row)
+    row.pop("path", None)
+    row["url"] = f"/api/images/{row['id']}/file"
+    return row
+
+
+@router.post("/devices/{device_id}/images")
+async def upload_image(device_id: str, file: UploadFile = File(...), note: Optional[str] = Form(None)):
+    """Store one plant photo, measure canopy cover, run the N/P/K model, and tell A16 what the camera saw."""
+    e = _check_device(device_id)
+    data = await _read_image(file)
+    result = _analyse(data)
+    now = e.last_tick or time.time()
+    rel = Path(time.strftime("%Y-%m-%d", time.localtime(now))) / f"{device_id}_{int(now * 1000)}.jpg"
+    full = Path(e.s.images_dir) / rel
+    full.parent.mkdir(parents=True, exist_ok=True)
+    img = vision.load_rgb(data)
+    img.thumbnail((1600, 1600))
+    img.save(full, "JPEG", quality=88)
+    npk = result["npk"]
+    row = {"ts": now, "device_id": device_id, "path": rel.as_posix(), "width": result["width"],
+           "height": result["height"], "day": round(e.day(now), 2), "stage": e.stage(now)["name"],
+           "canopy_pct": result["canopy_pct"], "npk_label": npk.get("label"), "npk_confidence": npk.get("confidence"),
+           "result_json": json.dumps(result), "note": note}
+    row["id"] = db.insert_image(row)
+    e.note_vision(npk, now)
+    row.pop("result_json")
+    row["result"] = result
+    return _image_out(row)
+
+
+@router.get("/devices/{device_id}/images")
+def list_images(device_id: str, limit: int = Query(200, ge=1, le=2000)):
+    _check_device(device_id)
+    return [_image_out(r) for r in db.list_images(device_id, limit)]
+
+
+@router.get("/images/{image_id}/file")
+def image_file(image_id: int):
+    row = db.get_image(image_id)
+    if not row:
+        raise HTTPException(404, "image not found")
+    root = Path(eng().s.images_dir).resolve()
+    full = (root / row["path"]).resolve()
+    if root not in full.parents or not full.exists():
+        raise HTTPException(404, "image file missing")
+    return FileResponse(full, media_type="image/jpeg")
+
+
+@router.delete("/images/{image_id}")
+def remove_image(image_id: int):
+    row = db.get_image(image_id)
+    if not row:
+        raise HTTPException(404, "image not found")
+    full = Path(eng().s.images_dir) / row["path"]
+    full.unlink(missing_ok=True)
+    db.delete_image(image_id)
+    return {"deleted": image_id}
+
+
+@router.get("/vision/npk")
+def npk_model_info():
+    clf = vision.get_classifier()
+    card = vision.MODEL_DIR / "npk_metrics.json"
+    return {"available": clf is not None, "reason": None if clf else vision._clf_error,
+            "classes": clf.classes if clf else None, "min_confidence": vision.MIN_CONFIDENCE,
+            "metrics": json.loads(card.read_text()) if card.exists() else None}
+
+
+@router.post("/vision/npk")
+async def npk_predict(file: UploadFile = File(...)):
+    """Try the N/P/K model on a photo without saving it or affecting control."""
+    return _analyse(await _read_image(file))

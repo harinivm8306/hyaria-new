@@ -2,7 +2,7 @@ import Link from "next/link";
 import Logo from "@/components/Logo";
 
 const cols = [
-  { title: "Platform", links: [["Command Centre", "/dashboard"], ["Disease Lab", "/detector"], ["Architecture", "/architecture"], ["AI models", "/ai"]] },
+  { title: "Platform", links: [["Command Centre", "/dashboard"], ["Plant camera", "/plants"], ["Disease Lab", "/detector"], ["Architecture", "/architecture"], ["AI models", "/ai"]] },
   { title: "Project", links: [["Problem", "/problem"], ["Solution", "/solution"], ["Prototype", "/prototype"], ["Results", "/results"]] },
   { title: "Research", links: [["Papers", "/research"], ["Datasets", "/dataset"], ["SDG impact", "/impact"], ["Team", "/team"]] },
 ];
