@@ -67,7 +67,8 @@ If no backend answers, `/dashboard` shows clearly labelled **demo data** (amber 
 - `src/app/dashboard/page.tsx` — command centre (+ `NutrientCard.tsx` N/P/K, plant camera panel); `src/components/dashboard/demo.ts` demo data.
 - `src/app/plants/page.tsx` — plant camera: capture/upload, auto-capture, timeline by day, canopy curve, model card.
 - `src/lib/api.ts` — `API_BASE` from `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`).
-- Older pages (`/problem`, `/solution`, `/architecture`, `/ai`, `/prototype`, `/results`, `/research`, `/dataset`, `/impact`, `/team`, `/contact`, `/demo`) inherit tokens/fonts but are **not yet redesigned**.
+- `src/app/architecture/page.tsx` — layer diagram (hardware → data in → engine → models → web app) with REAL/SIM/PLANNED chips, one control tick, wiring plan, stack. Update its `LAYERS`/`TICK` lists when parts change.
+- Older pages (`/problem`, `/solution`, `/ai`, `/prototype`, `/results`, `/research`, `/dataset`, `/impact`, `/team`, `/contact`, `/demo`) inherit tokens/fonts but are **not yet redesigned**.
 
 ## Rules for this project
 
